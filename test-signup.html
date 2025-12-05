@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Rekindle.ai Signup</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #555;
+        }
+        input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            box-sizing: border-box;
+        }
+        button {
+            background: #CC4F4E;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            width: 100%;
+        }
+        button:hover {
+            opacity: 0.9;
+        }
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 5px;
+        }
+        .success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        pre {
+            background: #f4f4f4;
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 Test Rekindle.ai Signup</h1>
+        <p>This page tests if user signup creates both an auth user and a profile.</p>
+        
+        <form id="signupForm">
+            <div class="form-group">
+                <label for="email">Email:</label>
+                <input type="email" id="email" required placeholder="test@example.com">
+            </div>
+            
+            <div class="form-group">
+                <label for="password">Password (min 6 chars):</label>
+                <input type="password" id="password" required minlength="6" placeholder="password123">
+            </div>
+            
+            <div class="form-group">
+                <label for="fullName">Full Name:</label>
+                <input type="text" id="fullName" required placeholder="John Doe">
+            </div>
+            
+            <button type="submit" id="submitBtn">Create Test User</button>
+        </form>
+        
+        <div id="result"></div>
+    </div>
+
+    <script>
+        // Replace with your Supabase credentials
+        const SUPABASE_URL = 'https://cxjigazdzujttcsyzatz.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN4amlnYXpkenVqdHRjc3l6YXR6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQxMDMxNjIsImV4cCI6MjA3OTY3OTE2Mn0.MKjlRzvVXYMgIIa5GdRfSRZatNR-SFYHu583ig7IN-s';
+        
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        
+        const resultDiv = document.getElementById('result');
+        const submitBtn = document.getElementById('submitBtn');
+        const form = document.getElementById('signupForm');
+        
+        function showResult(message, type = 'info') {
+            resultDiv.innerHTML = `<div class="result ${type}">${message}</div>`;
+        }
+        
+        function showDetailedResult(data) {
+            const details = `
+                <div class="result success">
+                    <h3>✅ Signup Successful!</h3>
+                    <p><strong>User ID:</strong> ${data.userId}</p>
+                    <p><strong>Email:</strong> ${data.email}</p>
+                    <p><strong>Profile Created:</strong> ${data.profileCreated ? 'Yes ✅' : 'No ❌'}</p>
+                    ${data.profile ? `
+                        <h4>Profile Details:</h4>
+                        <pre>${JSON.stringify(data.profile, null, 2)}</pre>
+                    ` : ''}
+                    <p><strong>Next Steps:</strong></p>
+                    <ol>
+                        <li>Check Supabase Dashboard → Authentication → Users (should see new user)</li>
+                        <li>Check Supabase Dashboard → Table Editor → profiles table (should see new row)</li>
+                    </ol>
+                </div>
+            `;
+            resultDiv.innerHTML = details;
+        }
+        
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Creating User...';
+            showResult('Creating user...', 'info');
+            
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const fullName = document.getElementById('fullName').value;
+            
+            try {
+                // Step 1: Create auth user
+                showResult('Step 1: Creating user in Supabase Auth...', 'info');
+                const { data: authData, error: signUpError } = await supabase.auth.signUp({
+                    email: email,
+                    password: password,
+                    options: {
+                        data: {
+                            full_name: fullName,
+                        },
+                    },
+                });
+                
+                if (signUpError) {
+                    throw new Error(`Auth signup failed: ${signUpError.message}`);
+                }
+                
+                if (!authData.user) {
+                    throw new Error('No user data returned from signup');
+                }
+                
+                const userId = authData.user.id;
+                showResult(`Step 2: User created! ID: ${userId}. Checking profile...`, 'info');
+                
+                // Step 2: Wait for trigger to create profile
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                // Step 3: Check if profile exists
+                let profile = null;
+                let attempts = 0;
+                const maxAttempts = 5;
+                
+                while (attempts < maxAttempts && !profile) {
+                    const { data, error } = await supabase
+                        .from('profiles')
+                        .select('*')
+                        .eq('id', userId)
+                        .single();
+                    
+                    if (data && !error) {
+                        profile = data;
+                        break;
+                    }
+                    
+                    attempts++;
+                    if (attempts < maxAttempts) {
+                        await new Promise(resolve => setTimeout(resolve, 500));
+                    }
+                }
+                
+                // Step 4: If profile doesn't exist, create it manually
+                if (!profile) {
+                    showResult('Profile not created by trigger. Creating manually...', 'info');
+                    const { data: newProfile, error: insertError } = await supabase
+                        .from('profiles')
+                        .insert({
+                            id: userId,
+                            email: email,
+                            full_name: fullName,
+                            tokens: 5,
+                        })
+                        .select()
+                        .single();
+                    
+                    if (insertError) {
+                        throw new Error(`Failed to create profile: ${insertError.message}`);
+                    }
+                    
+                    profile = newProfile;
+                }
+                
+                // Success!
+                showDetailedResult({
+                    userId: userId,
+                    email: email,
+                    profileCreated: true,
+                    profile: profile,
+                });
+                
+            } catch (error) {
+                showResult(`
+                    <h3>❌ Error</h3>
+                    <p><strong>Message:</strong> ${error.message}</p>
+                    <p><strong>Details:</strong></p>
+                    <pre>${JSON.stringify(error, null, 2)}</pre>
+                `, 'error');
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Create Test User';
+            }
+        });
+    </script>
+</body>
+</html>
+

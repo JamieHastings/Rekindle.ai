@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>We Miss You at Rekindle.ai</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background-color: #0f0f0f;
+      color: #e5e7eb;
+    }
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+      padding: 40px 20px;
+    }
+    .header {
+      text-align: center;
+      margin-bottom: 40px;
+    }
+    .logo {
+      font-size: 32px;
+      font-weight: bold;
+      color: #CC4F4E;
+      margin-bottom: 10px;
+    }
+    .content {
+      background-color: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 12px;
+      padding: 40px;
+    }
+    h1 {
+      font-size: 28px;
+      font-weight: bold;
+      color: #ffffff;
+      margin: 0 0 20px 0;
+    }
+    p {
+      font-size: 16px;
+      line-height: 1.6;
+      color: #9ca3af;
+      margin: 0 0 20px 0;
+    }
+    .highlight-box {
+      background-color: #CC4F4E;
+      color: #000000;
+      padding: 24px;
+      border-radius: 8px;
+      margin: 30px 0;
+      text-align: center;
+    }
+    .token-info {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .token-count {
+      font-size: 48px;
+      font-weight: bold;
+    }
+    .cta-button {
+      display: inline-block;
+      background-color: #CC4F4E;
+      color: #000000;
+      text-decoration: none;
+      padding: 14px 32px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 16px;
+      margin: 20px 0;
+    }
+    .examples {
+      margin: 30px 0;
+    }
+    .example {
+      background-color: #0f0f0f;
+      border: 1px solid #2a2a2a;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 12px;
+    }
+    .example-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: #ffffff;
+      margin-bottom: 8px;
+    }
+    .example-description {
+      font-size: 14px;
+      color: #9ca3af;
+      margin: 0;
+    }
+    .footer {
+      text-align: center;
+      margin-top: 40px;
+      padding-top: 20px;
+      border-top: 1px solid #2a2a2a;
+    }
+    .footer-text {
+      font-size: 12px;
+      color: #6b7280;
+      line-height: 1.5;
+    }
+    .unsubscribe {
+      font-size: 11px;
+      color: #6b7280;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="logo">Rekindle.ai</div>
+    </div>
+
+    <div class="content">
+      <h1>We Miss You, {{recipientName}}!</h1>
+
+      <p>
+        It's been {{daysSinceLastUse}} days since you last visited Rekindle.ai. We wanted to
+        check in and remind you that meaningful connections are just a few clicks away.
+      </p>
+
+      <div class="highlight-box">
+        <div class="token-info">You still have</div>
+        <div class="token-count">{{currentTokens}}</div>
+        <div class="token-info">tokens ready to use</div>
+      </div>
+
+      <p>
+        Your tokens are waiting to help you craft that perfect message. Whether it's rekindling
+        a relationship, celebrating a special moment, or simply expressing what's in your heart,
+        we're here to help.
+      </p>
+
+      <center>
+        <a href="{{appUrl}}" class="cta-button">Create a Message Now</a>
+      </center>
+
+      <div class="examples">
+        <p style="font-size: 18px; font-weight: 600; color: #ffffff; margin-bottom: 16px;">
+          Here's what you can create:
+        </p>
+
+        <div class="example">
+          <div class="example-title">💝 Romantic Poems</div>
+          <p class="example-description">
+            Express your feelings with beautiful, heartfelt poetry
+          </p>
+        </div>
+
+        <div class="example">
+          <div class="example-title">💌 Love Letters</div>
+          <p class="example-description">
+            Craft deeply personal letters that speak from the heart
+          </p>
+        </div>
+
+        <div class="example">
+          <div class="example-title">🤝 Apology Messages</div>
+          <p class="example-description">
+            Make amends with genuine, thoughtful apologies
+          </p>
+        </div>
+
+        <div class="example">
+          <div class="example-title">🎙️ Voicenote Scripts</div>
+          <p class="example-description">
+            Get natural-sounding scripts for authentic audio messages
+          </p>
+        </div>
+
+        <div class="example">
+          <div class="example-title">🎁 Gift Cards</div>
+          <p class="example-description">
+            Create personalized gift card messages with beautiful templates
+          </p>
+        </div>
+      </div>
+
+      <p>
+        Don't let time and distance keep you from the connections that matter. Take a moment
+        today to reach out to someone special.
+      </p>
+
+      <p style="margin-bottom: 0;">
+        We're here whenever you're ready.
+      </p>
+    </div>
+
+    <div class="footer">
+      <p class="footer-text">
+        © 2025 Rekindle.ai. All rights reserved.<br>
+        <a href="{{appUrl}}/privacy" style="color: #CC4F4E; text-decoration: none;">Privacy Policy</a> |
+        <a href="{{appUrl}}/terms" style="color: #CC4F4E; text-decoration: none;">Terms of Service</a>
+      </p>
+      <p class="unsubscribe">
+        Don't want to receive these emails?
+        <a href="{{appUrl}}/preferences" style="color: #CC4F4E; text-decoration: none;">Update your preferences</a>
+      </p>
+    </div>
+  </div>
+</body>
+</html>

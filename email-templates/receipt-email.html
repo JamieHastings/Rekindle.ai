@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Payment Receipt - Rekindle.ai</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background-color: #0f0f0f;
+      color: #e5e7eb;
+    }
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+      padding: 40px 20px;
+    }
+    .header {
+      text-align: center;
+      margin-bottom: 40px;
+    }
+    .logo {
+      font-size: 32px;
+      font-weight: bold;
+      color: #CC4F4E;
+      margin-bottom: 10px;
+    }
+    .content {
+      background-color: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 12px;
+      padding: 40px;
+    }
+    h1 {
+      font-size: 28px;
+      font-weight: bold;
+      color: #ffffff;
+      margin: 0 0 10px 0;
+    }
+    .subtitle {
+      font-size: 14px;
+      color: #9ca3af;
+      margin-bottom: 30px;
+    }
+    .receipt-box {
+      background-color: #0f0f0f;
+      border: 1px solid #2a2a2a;
+      border-radius: 8px;
+      padding: 24px;
+      margin: 30px 0;
+    }
+    .receipt-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 12px 0;
+      border-bottom: 1px solid #2a2a2a;
+    }
+    .receipt-row:last-child {
+      border-bottom: none;
+      padding-top: 16px;
+      font-weight: bold;
+    }
+    .receipt-label {
+      color: #9ca3af;
+      font-size: 14px;
+    }
+    .receipt-value {
+      color: #ffffff;
+      font-size: 14px;
+      font-weight: 500;
+    }
+    .total-label {
+      color: #ffffff;
+      font-size: 16px;
+    }
+    .total-value {
+      color: #CC4F4E;
+      font-size: 24px;
+    }
+    .success-badge {
+      display: inline-block;
+      background-color: #10b981;
+      color: #000000;
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 20px;
+    }
+    p {
+      font-size: 16px;
+      line-height: 1.6;
+      color: #9ca3af;
+      margin: 0 0 20px 0;
+    }
+    .cta-button {
+      display: inline-block;
+      background-color: #CC4F4E;
+      color: #000000;
+      text-decoration: none;
+      padding: 14px 32px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 16px;
+      margin: 20px 0;
+    }
+    .footer {
+      text-align: center;
+      margin-top: 40px;
+      padding-top: 20px;
+      border-top: 1px solid #2a2a2a;
+    }
+    .footer-text {
+      font-size: 12px;
+      color: #6b7280;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="logo">Rekindle.ai</div>
+    </div>
+
+    <div class="content">
+      <span class="success-badge">✓ PAYMENT SUCCESSFUL</span>
+
+      <h1>Thank you for your purchase!</h1>
+      <div class="subtitle">Receipt #{{transactionId}}</div>
+
+      <p>
+        Hi {{recipientName}}, your payment has been processed successfully. Your tokens have
+        been added to your account and are ready to use.
+      </p>
+
+      <div class="receipt-box">
+        <div class="receipt-row">
+          <span class="receipt-label">Date</span>
+          <span class="receipt-value">{{transactionDate}}</span>
+        </div>
+        <div class="receipt-row">
+          <span class="receipt-label">Description</span>
+          <span class="receipt-value">Rekindle.ai Tokens</span>
+        </div>
+        <div class="receipt-row">
+          <span class="receipt-label">Quantity</span>
+          <span class="receipt-value">{{tokenCount}} tokens</span>
+        </div>
+        <div class="receipt-row">
+          <span class="receipt-label">Transaction ID</span>
+          <span class="receipt-value">{{transactionId}}</span>
+        </div>
+        <div class="receipt-row">
+          <span class="total-label">Total Paid</span>
+          <span class="total-value">${{amountDollars}}</span>
+        </div>
+      </div>
+
+      <p>
+        Your {{tokenCount}} tokens have been added to your account. Tokens never expire and can
+        be used anytime to generate heartfelt messages.
+      </p>
+
+      <center>
+        <a href="{{appUrl}}" class="cta-button">Start Creating Messages</a>
+      </center>
+
+      <p style="font-size: 14px; color: #6b7280; margin-top: 30px;">
+        <strong>Need help?</strong><br>
+        If you have any questions about your purchase, please reply to this email or contact
+        our support team. We're here to help!
+      </p>
+
+      <p style="font-size: 12px; color: #6b7280; margin-bottom: 0;">
+        This is your official receipt for tax and accounting purposes. Please save this email
+        for your records.
+      </p>
+    </div>
+
+    <div class="footer">
+      <p class="footer-text">
+        © 2025 Rekindle.ai. All rights reserved.<br>
+        Rekindle AI LLC, 123 Main Street, San Francisco, CA 94105<br>
+        <a href="{{receiptUrl}}" style="color: #CC4F4E; text-decoration: none;">View Online Receipt</a>
+      </p>
+    </div>
+  </div>
+</body>
+</html>

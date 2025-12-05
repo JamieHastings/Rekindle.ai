@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Welcome to Rekindle.ai</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background-color: #0f0f0f;
+      color: #e5e7eb;
+    }
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+      padding: 40px 20px;
+    }
+    .header {
+      text-align: center;
+      margin-bottom: 40px;
+    }
+    .logo {
+      font-size: 32px;
+      font-weight: bold;
+      color: #CC4F4E;
+      margin-bottom: 10px;
+    }
+    .content {
+      background-color: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 12px;
+      padding: 40px;
+    }
+    h1 {
+      font-size: 28px;
+      font-weight: bold;
+      color: #ffffff;
+      margin: 0 0 20px 0;
+    }
+    p {
+      font-size: 16px;
+      line-height: 1.6;
+      color: #9ca3af;
+      margin: 0 0 20px 0;
+    }
+    .token-box {
+      background-color: #CC4F4E;
+      color: #000000;
+      padding: 20px;
+      border-radius: 8px;
+      text-align: center;
+      margin: 30px 0;
+    }
+    .token-count {
+      font-size: 48px;
+      font-weight: bold;
+      margin-bottom: 5px;
+    }
+    .token-label {
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .cta-button {
+      display: inline-block;
+      background-color: #CC4F4E;
+      color: #000000;
+      text-decoration: none;
+      padding: 14px 32px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 16px;
+      margin: 20px 0;
+    }
+    .features {
+      margin: 30px 0;
+    }
+    .feature {
+      margin-bottom: 20px;
+    }
+    .feature-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: #ffffff;
+      margin-bottom: 8px;
+    }
+    .footer {
+      text-align: center;
+      margin-top: 40px;
+      padding-top: 20px;
+      border-top: 1px solid #2a2a2a;
+    }
+    .footer-text {
+      font-size: 12px;
+      color: #6b7280;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="logo">Rekindle.ai</div>
+    </div>
+
+    <div class="content">
+      <h1>Welcome to Rekindle.ai, {{recipientName}}!</h1>
+
+      <p>
+        We're thrilled to have you here. Rekindle.ai is your AI-powered companion for crafting
+        meaningful messages that help you reconnect, celebrate, apologize, and express what
+        matters most in your relationships.
+      </p>
+
+      <div class="token-box">
+        <div class="token-count">{{freeTokens}}</div>
+        <div class="token-label">FREE TOKENS TO GET STARTED</div>
+      </div>
+
+      <p>
+        Your free tokens are ready to use! Each message generation costs 2 tokens, so you can
+        create your first heartfelt messages right away.
+      </p>
+
+      <center>
+        <a href="{{appUrl}}" class="cta-button">Start Creating Messages</a>
+      </center>
+
+      <div class="features">
+        <div class="feature">
+          <div class="feature-title">🎭 Multiple Message Types</div>
+          <p>Choose from poems, love letters, apologies, voicenote scripts, and gift cards.</p>
+        </div>
+
+        <div class="feature">
+          <div class="feature-title">🎨 Customizable Tones</div>
+          <p>Select from romantic, heartfelt, honest, apologetic, or humorous tones to match your style.</p>
+        </div>
+
+        <div class="feature">
+          <div class="feature-title">✨ AI-Powered Authenticity</div>
+          <p>Our AI creates messages that sound natural and personal, never generic or robotic.</p>
+        </div>
+
+        <div class="feature">
+          <div class="feature-title">📝 Flexible Lengths</div>
+          <p>Choose short, medium, or long messages depending on what feels right.</p>
+        </div>
+      </div>
+
+      <p>
+        Need more tokens? You can easily purchase additional tokens anytime. They never expire
+        and can be used whenever you need to craft that perfect message.
+      </p>
+
+      <p style="margin-bottom: 0;">
+        If you have any questions or need help, just reply to this email. We're here to help
+        you reconnect with the people who matter most.
+      </p>
+    </div>
+
+    <div class="footer">
+      <p class="footer-text">
+        © 2025 Rekindle.ai. All rights reserved.<br>
+        <a href="{{appUrl}}/privacy" style="color: #CC4F4E; text-decoration: none;">Privacy Policy</a> |
+        <a href="{{appUrl}}/terms" style="color: #CC4F4E; text-decoration: none;">Terms of Service</a>
+      </p>
+    </div>
+  </div>
+</body>
+</html>
