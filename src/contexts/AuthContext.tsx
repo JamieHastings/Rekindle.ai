@@ -159,16 +159,25 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const signOut = async () => {
     try {
-      const { error } = await supabase.auth.signOut();
-      if (error) {
-        console.error('Error signing out:', error);
-      }
-      // State will be cleared by onAuthStateChange listener
+      // Clear state immediately for better UX
       setProfile(null);
       setUser(null);
       setSession(null);
+      
+      // Sign out from Supabase
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        console.error('Error signing out:', error);
+        // If sign out fails, we still want to clear local state
+        // but we should restore it if needed
+      }
+      // State will also be cleared by onAuthStateChange listener as a backup
     } catch (err) {
       console.error('Error signing out:', err);
+      // Even if there's an error, clear local state
+      setProfile(null);
+      setUser(null);
+      setSession(null);
     }
   };
 
