@@ -1,21 +1,42 @@
 // src/admin/AdminApp.tsx
+import { useState } from 'react';
 import { AdminLayout } from './AdminLayout';
-import { UsersTable } from './UsersTable';
-import { PaymentsTable } from './PaymentsTable';
-import { TemplatesManager } from './TemplatesManager';
+import { AdminDashboardView } from './views/AdminDashboardView';
+import { AdminTemplatesView } from './views/AdminTemplatesView';
+import { AdminAnalyticsView } from './views/AdminAnalyticsView';
+import { AdminSettingsView } from './views/AdminSettingsView';
+
+type AdminView = 'dashboard' | 'templates' | 'analytics' | 'settings';
 
 interface AdminAppProps {
   onNavigate?: (view: 'home' | 'generator' | 'dashboard' | 'admin') => void;
 }
 
 export default function AdminApp({ onNavigate }: AdminAppProps){
+  const [activeView, setActiveView] = useState<AdminView>('dashboard');
+
+  const renderView = () => {
+    switch (activeView) {
+      case 'dashboard':
+        return <AdminDashboardView />;
+      case 'templates':
+        return <AdminTemplatesView />;
+      case 'analytics':
+        return <AdminAnalyticsView />;
+      case 'settings':
+        return <AdminSettingsView />;
+      default:
+        return <AdminDashboardView />;
+    }
+  };
+
   return (
-    <AdminLayout onNavigate={onNavigate}>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <UsersTable />
-        <PaymentsTable />
-      </div>
-      <TemplatesManager />
+    <AdminLayout
+      onNavigate={onNavigate}
+      activeView={activeView}
+      onViewChange={setActiveView}
+    >
+      {renderView()}
     </AdminLayout>
   );
 }

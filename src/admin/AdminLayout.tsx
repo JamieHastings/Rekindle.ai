@@ -1,5 +1,5 @@
 // src/admin/AdminLayout.tsx
-import React, { useState } from 'react';
+import React from 'react';
 import { LogOut, Home as HomeIcon, LayoutDashboard, FileText, BarChart3, Settings } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -8,12 +8,17 @@ type AdminView = 'dashboard' | 'templates' | 'analytics' | 'settings';
 interface AdminLayoutProps {
   children?: React.ReactNode;
   onNavigate?: (view: 'home' | 'generator' | 'dashboard' | 'admin') => void;
-  defaultView?: AdminView;
+  activeView?: AdminView;
+  onViewChange?: (view: AdminView) => void;
 }
 
-export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, onNavigate, defaultView = 'dashboard' }) => {
+export const AdminLayout: React.FC<AdminLayoutProps> = ({
+  children,
+  onNavigate,
+  activeView = 'dashboard',
+  onViewChange
+}) => {
   const { signOut, user, profile } = useAuth();
-  const [activeView, setActiveView] = useState<AdminView>(defaultView);
 
   const handleSignOut = async () => {
     try {
@@ -44,9 +49,9 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, onNavigate, 
   };
 
   const handleViewChange = (view: AdminView) => {
-    setActiveView(view);
-    // If onNavigate is provided, we can use it to communicate view changes
-    // For now, we'll handle views internally
+    if (onViewChange) {
+      onViewChange(view);
+    }
   };
 
   // Role-based protection: Only render if user is admin

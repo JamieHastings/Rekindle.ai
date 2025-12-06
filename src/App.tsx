@@ -372,6 +372,7 @@ function App() {
               <motion.button
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
+                onClick={() => handleViewChange('dashboard')}
                 className="px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 bg-[#CC4F4E] text-black"
               >
                 <LayoutDashboard className="w-5 h-5" />

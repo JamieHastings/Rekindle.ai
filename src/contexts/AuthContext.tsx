@@ -163,14 +163,30 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setProfile(null);
       setUser(null);
       setSession(null);
-      
+      setLoading(false);
+
+      // Clear any cached data in localStorage/sessionStorage
+      try {
+        const keysToRemove = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && key.includes('supabase')) {
+            keysToRemove.push(key);
+          }
+        }
+        keysToRemove.forEach(key => localStorage.removeItem(key));
+        sessionStorage.clear();
+      } catch (storageError) {
+        console.warn('Error clearing storage:', storageError);
+      }
+
       // Sign out from Supabase
       const { error } = await supabase.auth.signOut();
       if (error) {
-        console.error('Error signing out:', error);
-        // If sign out fails, we still want to clear local state
-        // but we should restore it if needed
+        console.error('Error signing out from Supabase:', error);
       }
+
+      console.log('User signed out successfully');
       // State will also be cleared by onAuthStateChange listener as a backup
     } catch (err) {
       console.error('Error signing out:', err);
@@ -178,6 +194,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setProfile(null);
       setUser(null);
       setSession(null);
+      setLoading(false);
     }
   };
 
