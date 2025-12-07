@@ -46,20 +46,58 @@ function App() {
     }
   }, [user, profile, loading, refreshProfile]);
 
-  // Auto-navigate admin users to admin dashboard after login
+  // Handle admin navigation - ensure profile is loaded and user is admin
   useEffect(() => {
-    if (user && profile && (profile.is_admin === true || profile.is_admin) && currentView !== 'admin' && currentView !== 'dashboard' && !loading) {
-      console.log('Admin user detected, navigating to admin dashboard...', {
-        user: !!user,
-        hasProfile: !!profile,
-        isAdmin: profile.is_admin,
-        isAdminType: typeof profile.is_admin,
-        currentView,
-        loading
+    // Only run this effect when we're on an admin route
+    if (user && (currentView === 'admin' || currentView === 'dashboard')) {
+      console.log('Admin route effect triggered', { 
+        hasUser: !!user, 
+        hasProfile: !!profile, 
+        loading, 
+        currentView
       });
-      setCurrentView('dashboard'); // Admin users will see AdminDashboard when clicking Dashboard
+      
+      // If profile is not loaded and we're not currently loading, try to load it
+      if (!profile && !loading) {
+        console.log('Profile not loaded, attempting refresh...');
+        refreshProfile().catch(err => {
+          console.error('Failed to refresh profile:', err);
+        });
+      }
+      
+      // If profile is loaded, check admin status and redirect if not admin
+      if (profile && !loading) {
+        const checkIsAdmin = (
+          profile.is_admin === true || 
+          profile.is_admin === 1 || 
+          profile.is_admin === 'true' ||
+          profile.is_admin === '1'
+        );
+        
+        if (!checkIsAdmin && (currentView === 'admin' || currentView === 'dashboard')) {
+          console.log('User is not admin, redirecting to home');
+          setCurrentView('home');
+        }
+      }
     }
-  }, [user, profile, loading, currentView]);
+  }, [user, profile, loading, currentView, refreshProfile]);
+
+  // Auto-navigate admin users to admin dashboard after login (optional - can be removed if not desired)
+  // This effect is commented out to allow manual navigation, but can be enabled if auto-navigation is desired
+  // useEffect(() => {
+  //   const isAdmin = profile && (profile.is_admin === true || profile.is_admin === 1 || profile.is_admin === 'true');
+  //   if (user && profile && isAdmin && currentView !== 'admin' && currentView !== 'dashboard' && !loading) {
+  //     console.log('Admin user detected, navigating to admin dashboard...', {
+  //       user: !!user,
+  //       hasProfile: !!profile,
+  //       isAdmin: profile.is_admin,
+  //       isAdminType: typeof profile.is_admin,
+  //       currentView,
+  //       loading
+  //     });
+  //     setCurrentView('admin'); // Use 'admin' view for consistency
+  //   }
+  // }, [user, profile, loading, currentView]);
 
   // Reset view when user logs out
   useEffect(() => {
@@ -68,6 +106,18 @@ function App() {
       setShowAuthModal(false);
     }
   }, [user, loading]);
+
+  // Role-based route protection: Redirect non-admin users away from admin routes
+  useEffect(() => {
+    if (user && profile && !loading && (currentView === 'admin' || currentView === 'dashboard')) {
+      const isAdmin = profile && (profile.is_admin === true || profile.is_admin === 1 || profile.is_admin === 'true');
+      if (!isAdmin && currentView === 'admin') {
+        // Non-admin user trying to access admin route - redirect to home
+        console.warn('Non-admin user attempted to access admin route, redirecting...');
+        setCurrentView('home');
+      }
+    }
+  }, [user, profile, loading, currentView]);
 
   // Debug logging
   useEffect(() => {
@@ -218,14 +268,84 @@ function App() {
     }
   };
 
-  // Admin users see AdminDashboard when clicking Dashboard or Admin
-  if ((currentView === 'admin' || currentView === 'dashboard') && user && profile && (profile.is_admin === true || profile.is_admin)) {
-    console.log('Rendering AdminDashboard', { currentView, hasUser: !!user, isAdmin: profile.is_admin });
-    return <AdminDashboard onNavigate={setCurrentView} />;
+  // Helper function to check if user is admin - handles various data types
+  const isAdminUser = profile && (
+    profile.is_admin === true || 
+    profile.is_admin === 1 || 
+    profile.is_admin === 'true' ||
+    profile.is_admin === '1'
+  );
+
+  // Role-based routing: Admin users see AdminDashboard
+  // Check for both 'admin' and 'dashboard' views when user is admin
+  // Only render if profile is loaded (not loading) to avoid race conditions
+  if (user && (currentView === 'admin' || currentView === 'dashboard')) {
+    // If still loading initial auth state, show loading
+    if (loading) {
+      return (
+        <div className="min-h-screen bg-background flex items-center justify-center">
+          <div className="text-text-light">Loading...</div>
+        </div>
+      );
+    }
+    
+    // If profile is not loaded, show loading state
+    // The useEffect will handle the refresh, but we'll also show a helpful message
+    if (!profile) {
+      console.log('Profile not loaded in routing check, showing loading state');
+      return (
+        <div className="min-h-screen bg-background flex items-center justify-center">
+          <div className="text-center">
+            <div className="text-text-light mb-2">Loading profile...</div>
+            <div className="text-text-light text-sm">Please wait while we verify your access.</div>
+          </div>
+        </div>
+      );
+    }
+    
+    // Profile is loaded, check if user is admin
+    const checkIsAdmin = profile && (
+      profile.is_admin === true || 
+      profile.is_admin === 1 || 
+      profile.is_admin === 'true' ||
+      profile.is_admin === '1'
+    );
+    
+    console.log('Admin routing check', {
+      currentView,
+      hasProfile: !!profile,
+      isAdminValue: profile?.is_admin,
+      checkIsAdmin,
+      loading
+    });
+    
+    if (checkIsAdmin) {
+      console.log('Rendering AdminDashboard', { 
+        currentView, 
+        hasUser: !!user, 
+        hasProfile: !!profile,
+        isAdmin: profile?.is_admin, 
+        checkIsAdmin,
+        loading 
+      });
+      return <AdminDashboard onNavigate={setCurrentView} />;
+    } else {
+      // User has profile but is not admin - redirect will be handled by useEffect
+      console.log('User is not admin, redirecting to home');
+      return (
+        <div className="min-h-screen bg-background flex items-center justify-center">
+          <div className="text-text-light">Redirecting...</div>
+        </div>
+      );
+    }
   }
 
   // Regular users see regular Dashboard
-  if (currentView === 'dashboard' && user) {
+  // Only show regular dashboard if:
+  // 1. User is signed in
+  // 2. Profile is loaded (not loading)
+  // 3. User is NOT an admin
+  if (currentView === 'dashboard' && user && !loading && profile && !isAdminUser) {
     return (
       <div className="min-h-screen bg-background">
         <nav className="bg-panel border-b border-border">
@@ -252,6 +372,7 @@ function App() {
               <motion.button
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
+                onClick={() => handleViewChange('dashboard')}
                 className="px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 bg-[#CC4F4E] text-black"
               >
                 <LayoutDashboard className="w-5 h-5" />
@@ -299,48 +420,80 @@ function App() {
             <img src="/Rekendle_ai_logo.PNG" alt="Rekendle.ai" className="h-16" />
           </motion.div>
           <div className="flex items-center gap-4">
-            {!loading && user && (
+            {user && (
               <>
-                {profile ? (
-                  <>
-                    <motion.button
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.95 }}
-                      onClick={() => handleViewChange('dashboard')}
-                      className="px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 text-text-light hover:text-text-dark hover:bg-background"
-                    >
-                      <LayoutDashboard className="w-5 h-5" />
-                      <span className="hidden md:inline">Dashboard</span>
-                    </motion.button>
-
-                    {/* Admin users see AdminDashboard when clicking Dashboard, so no separate Admin button needed */}
-
-                    <motion.div
-                      initial={{ opacity: 0, scale: 0.9 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      className="flex items-center gap-2 px-4 py-2 bg-background border border-border rounded-lg cursor-pointer hover:border-[#CC4F4E] transition-colors"
-                      onClick={() => setShowTokenModal(true)}
-                    >
-                      <Coins className="w-5 h-5 text-[#CC4F4E]" />
-                      <span className="text-text-dark font-medium">{profile.tokens || 0}</span>
-                      <span className="text-text-light text-sm hidden md:inline">tokens</span>
-                    </motion.div>
-                  </>
-                ) : (
-                  <button
-                    onClick={() => refreshProfile()}
+                {/* Admin users see Admin Dashboard button */}
+                {isAdminUser ? (
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => {
+                      console.log('Admin Dashboard button clicked', { 
+                        hasProfile: !!profile, 
+                        isAdmin: profile?.is_admin,
+                        loading,
+                        currentView 
+                      });
+                      
+                      // Directly set the view - the routing logic will handle rendering
+                      handleViewChange('admin');
+                    }}
                     className="px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 text-text-light hover:text-text-dark hover:bg-background"
                   >
-                    Refresh Profile
-                  </button>
+                    <LayoutDashboard className="w-5 h-5" />
+                    <span className="hidden md:inline">Admin Dashboard</span>
+                  </motion.button>
+                ) : (
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={async () => {
+                      // Ensure profile is loaded before navigating to dashboard
+                      if (!profile && !loading) {
+                        await refreshProfile();
+                      }
+                      handleViewChange('dashboard');
+                    }}
+                    className="px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 text-text-light hover:text-text-dark hover:bg-background"
+                  >
+                    <LayoutDashboard className="w-5 h-5" />
+                    <span className="hidden md:inline">Dashboard</span>
+                  </motion.button>
+                )}
+
+                {/* Admin users see AdminDashboard when clicking Dashboard, so no separate Admin button needed */}
+
+                {profile && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="flex items-center gap-2 px-4 py-2 bg-background border border-border rounded-lg cursor-pointer hover:border-[#CC4F4E] transition-colors"
+                    onClick={() => setShowTokenModal(true)}
+                  >
+                    <Coins className="w-5 h-5 text-[#CC4F4E]" />
+                    <span className="text-text-dark font-medium">{profile.tokens || 0}</span>
+                    <span className="text-text-light text-sm hidden md:inline">tokens</span>
+                  </motion.div>
                 )}
               </>
             )}
             {user ? (
               <button
                 onClick={async () => {
-                  await signOut();
-                  setCurrentView('home');
+                  try {
+                    await signOut();
+                    // Clear all local state
+                    setCurrentView('home');
+                    setShowAuthModal(false);
+                    setGeneratedMessage('');
+                    setError('');
+                    setCurrentFormData(null);
+                  } catch (error) {
+                    console.error('Error during sign out:', error);
+                    // Even if sign out fails, try to clear state and redirect
+                    setCurrentView('home');
+                    setShowAuthModal(false);
+                  }
                 }}
                 className="px-4 py-2 text-text-light hover:text-text-dark transition-colors flex items-center gap-2"
               >
