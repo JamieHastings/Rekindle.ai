@@ -1,0 +1,22 @@
+You are an expert relationship writer.  
+Your task is to write a deeply meaningful and emotionally honest poem.
+
+RELATIONSHIP CONTEXT:
+- Relationship status: {{ relationship_status }}
+- Lover's name: {{ lover_name }}
+- Your name: {{ your_name }}
+- What happened / what you did wrong: {{ what_happened }}
+- Desired tone: {{ tone }}
+{% if short_description %}
+- Additional context: {{ short_description }}
+{% endif %}
+
+INSTRUCTIONS:
+- Write a poem that feels personal, authentic, and emotionally grounded.
+- Avoid clichés unless they genuinely fit the tone.
+- Keep the style consistent with {{ tone }}.
+- The poem should feel like it is written directly from {{ your_name }} to {{ lover_name }}.
+- The poem should be emotionally intelligent, taking accountability without sounding desperate.
+- Do not include formatting like "**Poem:**". Output only the poem itself.
+
+Now write the poem.

@@ -1,11 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
-};
+import { corsHeaders } from "../_shared/cors.ts";
 
 Deno.serve(async (req: Request) => {
   try {
@@ -144,7 +140,18 @@ Deno.serve(async (req: Request) => {
       .update({ unlocked_by_user_id: user.id })
       .eq("id", previewId);
 
-    const { error: messageError } = await supabaseAdmin
+    // Build input_data from preview form_data if available, otherwise reconstruct from preview fields
+    const inputData = preview.form_data || {
+      name: preview.recipient_name,
+      relationshipLength: preview.relationship_length,
+      tone: preview.tone,
+      messageType: preview.message_type,
+      occasion: preview.occasion,
+      additionalDetails: preview.additional_details,
+      characterLength: preview.character_length,
+    };
+
+    const { data: savedMessage, error: messageError } = await supabaseAdmin
       .from("generated_messages")
       .insert({
         user_id: user.id,
@@ -156,12 +163,27 @@ Deno.serve(async (req: Request) => {
         additional_details: preview.additional_details,
         character_length: preview.character_length,
         generated_content: preview.full_content,
-        was_preview: true,
-        preview_id: preview.id,
-      });
+        input_data: inputData, // Store full form data as JSON
+        is_preview: true, // This message was unlocked from a preview
+      })
+      .select()
+      .single();
 
     if (messageError) {
-      console.error("Failed to save unlocked message:", messageError);
+      console.error("❌ Failed to save unlocked message to database:", messageError);
+      console.error("   Error details:", {
+        code: messageError.code,
+        message: messageError.message,
+        details: messageError.details,
+        hint: messageError.hint,
+      });
+    } else {
+      console.log("✅ Unlocked message saved to database successfully:", {
+        messageId: savedMessage?.id,
+        messageType: preview.message_type,
+        userId: user.id,
+        wasPreview: true,
+      });
     }
 
     await supabaseAdmin
@@ -177,6 +199,7 @@ Deno.serve(async (req: Request) => {
         fullContent: preview.full_content,
         message,
         tokensAwarded: tokensAwarded > 0 ? tokensAwarded : undefined,
+        messageId: savedMessage?.id || null, // Return messageId for regeneration
       }),
       {
         status: 200,

@@ -37,7 +37,7 @@ export default function PreviewMessageDisplay({
               <p className="text-text-dark font-semibold">Want to see the full message?</p>
             </div>
             <p className="text-text-light text-sm">
-              Sign up now and get <span className="text-[#CC4F4E] font-semibold">5 free tokens</span> to unlock this message!
+              Sign up now and get <span className="text-[#CC4F4E] font-semibold">3 free tokens</span> to unlock this message!
             </p>
           </div>
 
@@ -48,7 +48,7 @@ export default function PreviewMessageDisplay({
             className="w-full px-6 py-4 bg-[#CC4F4E] text-black rounded-lg hover:opacity-90 transition-all shadow-lg hover:shadow-xl font-medium text-lg flex items-center justify-center gap-2"
           >
             <Lock className="w-5 h-5" />
-            Unlock Full Message + Get 5 Free Tokens
+            Unlock Full Message + Get 3 Free Tokens
           </motion.button>
 
           {remainingPreviews > 0 && (

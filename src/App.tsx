@@ -13,10 +13,13 @@ import { useAuth } from './contexts/AuthContext';
 import { supabase } from './lib/supabase';
 import { mapFormDataToBackend } from './utils/formMapper';
 import { N8nService } from './services/n8nService';
-import { SessionManager } from './utils/sessionManager';
+import { SessionManager, MAX_PREVIEWS } from './utils/sessionManager';
 import { PreviewService } from './services/previewService';
 import PreviewMessageDisplay from './components/PreviewMessageDisplay';
 import UnlockPreviewModal from './components/UnlockPreviewModal';
+import { renderPromptFromForm } from './services/promptEngine';
+import { generateAIText } from './services/openaiService';
+import { deductTokens, addTokens, getTokenCost, hasEnoughTokens } from './services/tokenService';
 
 type View = 'home' | 'generator' | 'dashboard' | 'admin';
 
@@ -37,6 +40,7 @@ function App() {
   const [previewId, setPreviewId] = useState<string>('');
   const [showUnlockModal, setShowUnlockModal] = useState(false);
   const [remainingPreviews, setRemainingPreviews] = useState(3);
+  const [lastGeneratedMessageId, setLastGeneratedMessageId] = useState<string | null>(null);
 
   // Refresh profile when user logs in
   useEffect(() => {
@@ -48,8 +52,8 @@ function App() {
 
   // Handle admin navigation - ensure profile is loaded and user is admin
   useEffect(() => {
-    // Only run this effect when we're on an admin route
-    if (user && (currentView === 'admin' || currentView === 'dashboard')) {
+    // Only run this effect when we're on an admin route (not regular dashboard)
+    if (user && currentView === 'admin') {
       console.log('Admin route effect triggered', { 
         hasUser: !!user, 
         hasProfile: !!profile, 
@@ -74,7 +78,7 @@ function App() {
           profile.is_admin === '1'
         );
         
-        if (!checkIsAdmin && (currentView === 'admin' || currentView === 'dashboard')) {
+        if (!checkIsAdmin && currentView === 'admin') {
           console.log('User is not admin, redirecting to home');
           setCurrentView('home');
         }
@@ -99,19 +103,21 @@ function App() {
   //   }
   // }, [user, profile, loading, currentView]);
 
-  // Reset view when user logs out
+  // Reset view when user logs out (but allow anonymous users to use generator)
+  // Only reset if we were on a protected view (dashboard/admin) and user logs out
   useEffect(() => {
-    if (!user && !loading) {
+    if (!user && !loading && (currentView === 'dashboard' || currentView === 'admin')) {
+      console.log('User logged out from protected view, resetting to home');
       setCurrentView('home');
       setShowAuthModal(false);
     }
-  }, [user, loading]);
+  }, [user, loading, currentView]);
 
-  // Role-based route protection: Redirect non-admin users away from admin routes
+  // Role-based route protection: Redirect non-admin users away from admin routes only
   useEffect(() => {
-    if (user && profile && !loading && (currentView === 'admin' || currentView === 'dashboard')) {
+    if (user && profile && !loading && currentView === 'admin') {
       const isAdmin = profile && (profile.is_admin === true || profile.is_admin === 1 || profile.is_admin === 'true');
-      if (!isAdmin && currentView === 'admin') {
+      if (!isAdmin) {
         // Non-admin user trying to access admin route - redirect to home
         console.warn('Non-admin user attempted to access admin route, redirecting...');
         setCurrentView('home');
@@ -146,10 +152,23 @@ function App() {
   const handleGenerate = async (formData: FormData) => {
     if (!user) {
       const session = SessionManager.getOrCreateSession();
+      console.log('🔍 Anonymous user preview check:', {
+        sessionId: session.id,
+        previewCount: session.previewCount,
+        canGeneratePreview: session.canGeneratePreview,
+        maxPreviews: 3
+      });
+      
       if (!session.canGeneratePreview) {
+        console.log('⚠️ Preview limit reached, showing auth modal');
+        console.log('💡 To reset preview count for testing, run in console:');
+        console.log('   SessionManager.resetPreviewCount()');
+        setError(`You've used all ${MAX_PREVIEWS} free previews. Please sign up to continue generating messages!`);
         setShowAuthModal(true);
         return;
       }
+      
+      console.log('✅ Preview generation allowed, proceeding...');
 
       setCurrentFormData(formData);
       setIsGenerating(true);
@@ -158,21 +177,56 @@ function App() {
       setIsPreviewMode(true);
 
       try {
+        console.log('🔄 Starting preview generation for anonymous user');
+        console.log('📝 Message type:', formData.messageType);
+        console.log('📋 Form data:', formData);
+        
         const backendFormData = mapFormDataToBackend(formData);
+        console.log('✅ Form data mapped to backend format:', backendFormData);
+        
+        console.log('🚀 Calling PreviewService.generatePreview()...');
         const preview = await PreviewService.generatePreview(backendFormData);
+        
+        console.log('✅ Preview generated successfully:', {
+          previewId: preview.previewId,
+          partialContentLength: preview.partialContent.length,
+          remainingPreviews: preview.remainingPreviews
+        });
+        
         setGeneratedMessage(preview.partialContent);
         setPreviewId(preview.previewId);
         setRemainingPreviews(preview.remainingPreviews);
+        
+        console.log('✅ Preview displayed to user');
       } catch (err) {
-        console.error('Error generating preview:', err);
-        setError(err instanceof Error ? err.message : 'Failed to generate preview');
+        console.error('❌ Error generating preview:', err);
+        const errorMessage = err instanceof Error ? err.message : 'Failed to generate preview';
+        
+        // Provide more helpful error messages - DO NOT show auth modal for technical errors
+        if (errorMessage.includes('OpenAI API key') || errorMessage.includes('VITE_OPENAI_API_KEY')) {
+          setError('OpenAI API key is missing. Please add VITE_OPENAI_API_KEY to .env.local file and restart the dev server.');
+        } else if (errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
+          setError('Invalid OpenAI API key. Please check your .env.local file.');
+        } else if (errorMessage.includes('429') || errorMessage.includes('rate limit')) {
+          setError('OpenAI rate limit exceeded. Please try again later.');
+        } else if (errorMessage.includes('quota')) {
+          setError('OpenAI account has insufficient quota. Please check your billing.');
+        } else if (errorMessage.includes('Preview limit reached')) {
+          // This is the only case where we should show auth modal
+          setError(`You've used all ${MAX_PREVIEWS} free previews. Please sign up to continue generating messages!`);
+          setShowAuthModal(true);
+        } else {
+          setError(`Failed to generate preview: ${errorMessage}. Please try again.`);
+        }
       } finally {
         setIsGenerating(false);
       }
       return;
     }
 
-    if (!profile || profile.tokens < 2) {
+    // Check if user has enough tokens (minimum 5 for most message types, 15 for giftcard/love_letter)
+    const tokenCost = getTokenCost(formData.messageType);
+    if (!profile || profile.tokens < tokenCost) {
       setShowTokenModal(true);
       return;
     }
@@ -185,56 +239,277 @@ function App() {
     setIsPreviewMode(false);
 
     try {
-      const backendFormData = mapFormDataToBackend(formData);
+      // Use the generate-message edge function instead of client-side code
+      console.log('📝 Generating message via edge function for type:', formData.messageType);
+      console.log('  - User ID:', user.id);
+      
+      // Get access token for edge function
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error('Not authenticated');
+      }
 
-      const data = await N8nService.generateMessage(backendFormData);
-      setGeneratedMessage(data.message);
+      // Map form data to edge function format
+      // Use the original messageType (poem, letter, apology, text, giftcard) not the backend mapped type
+      const messageTypeForEdge = formData.messageType; // Keep original type
+      
+      // Prepare prompt data for edge function - include all form fields
+      const promptData: any = {
+        ...formData, // Include all form fields
+        name: formData.loverName || formData.recipientName || formData.apologyLoverName || formData.voicenoteLoverName || formData.giftCardLoverName || '',
+        tone: formData.tone || formData.poemTone || formData.apologyTone || formData.voicenoteTone || formData.giftCardTone || 'heartfelt',
+        relationshipLength: formData.relationshipLength || 'Not specified',
+        characterLength: formData.characterLength || formData.length || formData.apologyLength || formData.voicenoteLength || 'medium',
+        additionalDetails: formData.additionalDetails || formData.whatHappened || formData.significantMessage || formData.voicenoteSignificantMessage || formData.giftCardWhatHappened || '',
+      };
+      
+      if (formData.occasion) {
+        promptData.occasion = formData.occasion;
+      }
+
+      // Call generate-message edge function
+      const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+      if (!SUPABASE_URL) {
+        throw new Error('VITE_SUPABASE_URL is not set');
+      }
+
+      console.log('🚀 Calling generate-message edge function:', {
+        messageType: messageTypeForEdge,
+        promptDataKeys: Object.keys(promptData),
+      });
+
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/generate-message`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY || '',
+        },
+        body: JSON.stringify({
+          messageType: messageTypeForEdge,
+          promptData: promptData,
+          preview: false,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        const errorMessage = errorData.error || `HTTP ${response.status}`;
+        
+        if (response.status === 402) {
+          // Insufficient tokens
+          setError(errorMessage);
+          setShowTokenModal(true);
+          return;
+        }
+        
+        throw new Error(errorMessage);
+      }
+
+      const result = await response.json();
+      console.log('✅ Message generated via edge function:', {
+        messageId: result.messageId,
+        tokens_remaining: result.tokens_remaining,
+        tokens_deducted: result.tokens_deducted || 0,
+        is_first_message: result.is_first_message || false,
+        preview_length: result.preview?.length,
+        full_length: result.full?.length,
+      });
+
+      // Store message ID for regeneration
+      if (result.messageId) {
+        setLastGeneratedMessageId(result.messageId);
+      }
+
+      // Show message if first message was free
+      if (result.is_first_message) {
+        console.log('🎁 First message is FREE - no tokens deducted!');
+      }
+
+      // Update UI with generated message
+      if (result.full) {
+        setGeneratedMessage(result.full);
+      } else {
+        throw new Error('No message content in response');
+      }
+
+      // Refresh profile to get updated token count
       await refreshProfile();
 
+      // Show gift card template if applicable
       if (formData.messageType === 'giftcard') {
         setShowGiftCardTemplate(true);
       }
     } catch (err) {
       console.error('Error generating message:', err);
-      setError(err instanceof Error ? err.message : 'Failed to generate message');
+      const errorMessage = err instanceof Error ? err.message : 'Failed to generate message';
+      
+      // Provide more helpful error messages
+      if (errorMessage.includes('Insufficient tokens')) {
+        setError(errorMessage);
+        setShowTokenModal(true);
+      } else if (errorMessage.includes('OpenAI API key') || errorMessage.includes('VITE_OPENAI_API_KEY')) {
+        setError('OpenAI API key is missing. Please add VITE_OPENAI_API_KEY to .env.local file and restart the dev server.');
+      } else if (errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
+        setError('Invalid OpenAI API key. Please check your .env.local file.');
+      } else if (errorMessage.includes('429') || errorMessage.includes('rate limit')) {
+        setError('OpenAI rate limit exceeded. Please try again later.');
+      } else if (errorMessage.includes('quota')) {
+        setError('OpenAI account has insufficient quota. Please check your billing.');
+      } else if (errorMessage.includes('Token deduction failed')) {
+        // Token was already deducted, but generation failed - this is handled
+        setError('Failed to generate message. Please try again.');
+      } else {
+        setError(errorMessage);
+      }
     } finally {
       setIsGenerating(false);
     }
   };
 
-  const handlePurchaseTokens = async (tokenCount: number) => {
+  const handlePurchaseTokens = async (tokenCount: number, paymentId?: string) => {
     if (!user || !profile) return;
 
     try {
-      const { error } = await supabase
-        .from('profiles')
-        .update({ tokens: profile.tokens + tokenCount })
-        .eq('id', user.id);
-
-      if (error) throw error;
-
-      await supabase.from('token_transactions').insert({
-        user_id: user.id,
-        transaction_type: 'purchase',
-        amount: tokenCount,
-        description: `Purchased ${tokenCount} tokens`,
-      });
-
+      console.log(`💳 Adding ${tokenCount} tokens to user account...`);
+      const addResult = await addTokens(
+        tokenCount,
+        'purchase',
+        paymentId,
+        { purchased_at: new Date().toISOString() }
+      );
+      
+      console.log(`✅ Tokens added. New balance: ${addResult.tokens_remaining}`);
       await refreshProfile();
       setShowTokenModal(false);
     } catch (err) {
       console.error('Error purchasing tokens:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Failed to purchase tokens';
+      setError(errorMessage);
     }
   };
 
   const handleRegenerate = async () => {
-    if (!profile || profile.tokens < 2) {
+    if (!user || !profile) {
       setShowTokenModal(true);
       return;
     }
 
-    if (currentFormData) {
-      await handleGenerate(currentFormData);
+    // Check if we have a message ID to regenerate
+    // If not, try to get the most recent message for this user
+    let messageIdToRegenerate = lastGeneratedMessageId;
+    
+    if (!messageIdToRegenerate) {
+      console.log('⚠️ No messageId stored, attempting to find most recent message...');
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          // Try to get the most recent message from the database
+          const { data: messages, error: fetchError } = await supabase
+            .from('generated_messages')
+            .select('id')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .single();
+          
+          if (!fetchError && messages?.id) {
+            messageIdToRegenerate = messages.id;
+            setLastGeneratedMessageId(messages.id);
+            console.log('✅ Found most recent message:', messageIdToRegenerate);
+          } else {
+            setError('No message to regenerate. Please generate a message first.');
+            return;
+          }
+        } else {
+          setError('No message to regenerate. Please generate a message first.');
+          return;
+        }
+      } catch (err) {
+        console.error('Error finding message:', err);
+        setError('No message to regenerate. Please generate a message first.');
+        return;
+      }
+    }
+
+    // Regeneration always costs 2 tokens (not the message type cost)
+    const REGENERATE_TOKEN_COST = 2;
+    const currentTokens = profile.tokens;
+
+    // Check if user has enough tokens for regeneration (2 tokens)
+    if (currentTokens < REGENERATE_TOKEN_COST) {
+      setError(`Insufficient tokens. You need ${REGENERATE_TOKEN_COST} tokens to regenerate. You currently have ${currentTokens} tokens.`);
+      setShowTokenModal(true);
+      return;
+    }
+
+    setIsGenerating(true);
+    setError('');
+
+    try {
+      // Get access token for edge function
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error('Not authenticated');
+      }
+
+      // Call regenerate-message edge function
+      const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+      if (!SUPABASE_URL) {
+        throw new Error('VITE_SUPABASE_URL is not set');
+      }
+
+      console.log('🔄 Regenerating message via edge function:', {
+        messageId: messageIdToRegenerate,
+        tokenCost: REGENERATE_TOKEN_COST,
+      });
+
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/regenerate-message`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY || '',
+        },
+        body: JSON.stringify({
+          messageId: messageIdToRegenerate,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        const errorMessage = errorData.error || `HTTP ${response.status}`;
+
+        if (response.status === 402) {
+          // Insufficient tokens
+          setError(errorMessage);
+          setShowTokenModal(true);
+          return;
+        }
+
+        throw new Error(errorMessage);
+      }
+
+      const result = await response.json();
+      console.log('✅ Message regenerated via edge function:', {
+        tokens_remaining: result.tokens_remaining,
+        newMessageLength: result.newMessage?.length,
+      });
+
+      // Update UI with regenerated message
+      if (result.newMessage) {
+        setGeneratedMessage(result.newMessage);
+      } else {
+        throw new Error('No message content in response');
+      }
+
+      // Refresh profile to get updated token count
+      await refreshProfile();
+    } catch (err) {
+      console.error('Error regenerating message:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Failed to regenerate message';
+      setError(errorMessage);
+    } finally {
+      setIsGenerating(false);
     }
   };
 
@@ -250,9 +525,16 @@ function App() {
     setShowUnlockModal(true);
   };
 
-  const handleUnlockSuccess = (fullContent: string, tokensAwarded: number) => {
+  const handleUnlockSuccess = (fullContent: string, tokensAwarded: number, messageId?: string) => {
     setGeneratedMessage(fullContent);
     setIsPreviewMode(false);
+    
+    // Store messageId for regeneration
+    if (messageId) {
+      setLastGeneratedMessageId(messageId);
+      console.log('✅ MessageId stored for regeneration:', messageId);
+    }
+    
     if (tokensAwarded > 0) {
       refreshProfile();
     }
@@ -277,9 +559,8 @@ function App() {
   );
 
   // Role-based routing: Admin users see AdminDashboard
-  // Check for both 'admin' and 'dashboard' views when user is admin
-  // Only render if profile is loaded (not loading) to avoid race conditions
-  if (user && (currentView === 'admin' || currentView === 'dashboard')) {
+  // Only handle 'admin' view here - dashboard view is handled separately below
+  if (user && currentView === 'admin') {
     // If still loading initial auth state, show loading
     if (loading) {
       return (
@@ -330,14 +611,22 @@ function App() {
       });
       return <AdminDashboard onNavigate={setCurrentView} />;
     } else {
-      // User has profile but is not admin - redirect will be handled by useEffect
+      // User has profile but is not admin - redirect to home
       console.log('User is not admin, redirecting to home');
+      setCurrentView('home');
       return (
         <div className="min-h-screen bg-background flex items-center justify-center">
           <div className="text-text-light">Redirecting...</div>
         </div>
       );
     }
+  }
+  
+  // Also handle dashboard view when admin user navigates to it
+  // Admin users should see AdminDashboard even when clicking "Dashboard"
+  if (user && currentView === 'dashboard' && isAdminUser && !loading && profile) {
+    console.log('Admin user navigated to dashboard, showing AdminDashboard');
+    return <AdminDashboard onNavigate={setCurrentView} />;
   }
 
   // Regular users see regular Dashboard

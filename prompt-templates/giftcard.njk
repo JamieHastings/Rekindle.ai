@@ -1,0 +1,22 @@
+You are an expert at writing short, meaningful gift card notes for relationships.
+
+RELATIONSHIP CONTEXT:
+- Relationship status: {{ relationship_status }}
+- Lover's name: {{ lover_name }}
+- Your name: {{ your_name }}
+- What happened / what you did wrong: {{ what_happened }}
+- Tone: {{ tone }}
+{% if short_description %}
+- Additional context: {{ short_description }}
+{% endif %}
+
+INSTRUCTIONS:
+- Write a short, heartfelt gift card message.
+- Address {{ lover_name }} directly.
+- Match the tone: {{ tone }}.
+- Keep it concise but meaningful.
+- Include a gentle acknowledgment of what happened, without overexplaining.
+- End with your name.
+- Do not add labels like "Gift Card:" — output only the message.
+
+Now write the gift card message.

@@ -8,7 +8,7 @@ import { SessionManager } from '../utils/sessionManager';
 interface UnlockPreviewModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onUnlockSuccess: (fullContent: string, tokensAwarded: number) => void;
+  onUnlockSuccess: (fullContent: string, tokensAwarded: number, messageId?: string) => void;
   previewId: string;
 }
 
@@ -35,6 +35,7 @@ export default function UnlockPreviewModal({
     setError('');
 
     try {
+      // Step 1: Create the user account
       const { data: authData, error: signUpError } = await supabase.auth.signUp({
         email,
         password,
@@ -47,19 +48,63 @@ export default function UnlockPreviewModal({
 
       if (signUpError) throw signUpError;
 
-      if (!authData.session) {
-        setError('Failed to create session');
+      // Step 2: Check if user was created
+      if (!authData.user) {
+        setError('Failed to create account. Please try again.');
         return;
       }
 
-      const { fullContent, tokensAwarded } = await PreviewService.unlockPreview(
+      // Step 3: Ensure we have a session (auto sign-in if needed)
+      let accessToken: string | null = null;
+
+      if (authData.session) {
+        // Session created immediately - use it
+        accessToken = authData.session.access_token;
+      } else {
+        // Session not available - automatically sign in to establish session
+        console.log('No session after signup, automatically signing in...');
+        
+        // Wait a moment for the user to be fully created
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Automatically sign in with the credentials to establish a session
+        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+
+        if (signInError) {
+          console.error('Auto sign-in after signup failed:', signInError);
+          setError('Account created, but failed to sign in. Please try signing in manually.');
+          return;
+        }
+
+        if (signInData?.session?.access_token) {
+          accessToken = signInData.session.access_token;
+          console.log('Successfully signed in after signup');
+        } else {
+          setError('Account created, but failed to establish session. Please try signing in manually.');
+          return;
+        }
+      }
+
+      // Step 4: Wait a moment for profile to be created by database trigger
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      // Step 5: Unlock the preview with the access token
+      if (!accessToken) {
+        setError('Failed to establish session. Please try again.');
+        return;
+      }
+
+      const { fullContent, tokensAwarded, messageId } = await PreviewService.unlockPreview(
         previewId,
-        authData.session.access_token
+        accessToken
       );
 
       SessionManager.clearSession();
 
-      onUnlockSuccess(fullContent, tokensAwarded || 0);
+      onUnlockSuccess(fullContent, tokensAwarded || 0, messageId || undefined);
       onClose();
     } catch (err) {
       console.error('Signup error:', err);
@@ -91,14 +136,14 @@ export default function UnlockPreviewModal({
         return;
       }
 
-      const { fullContent } = await PreviewService.unlockPreview(
+      const { fullContent, tokensAwarded, messageId } = await PreviewService.unlockPreview(
         previewId,
         authData.session.access_token
       );
 
       SessionManager.clearSession();
 
-      onUnlockSuccess(fullContent, 0);
+      onUnlockSuccess(fullContent, tokensAwarded || 0, messageId || undefined);
       onClose();
     } catch (err) {
       console.error('Signin error:', err);
@@ -125,7 +170,7 @@ export default function UnlockPreviewModal({
             <div className="relative p-6 border-b border-border bg-gradient-to-r from-[#CC4F4E] to-[#CC4F4E] bg-opacity-10">
               <button
                 onClick={onClose}
-                className="absolute top-4 right-4 text-text-light hover:text-text-dark transition-colors"
+                className="absolute top-4 right-4 text-gray-700 hover:text-gray-900 transition-colors"
               >
                 <X className="w-6 h-6" />
               </button>
@@ -133,11 +178,11 @@ export default function UnlockPreviewModal({
                 <div className="p-2 bg-[#CC4F4E] rounded-lg">
                   <Lock className="w-6 h-6 text-white" />
                 </div>
-                <h2 className="text-2xl font-bold text-text-dark">Unlock Your Message</h2>
+                <h2 className="text-2xl font-bold text-gray-900">Unlock Your Message</h2>
               </div>
-              <div className="flex items-center gap-2 text-text-light">
-                <Sparkles className="w-4 h-4 text-[#CC4F4E]" />
-                <p className="text-sm">New users get 5 free tokens!</p>
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-[#8B0000]" />
+                <p className="text-sm font-semibold text-gray-900">New users get 3 free tokens!</p>
               </div>
             </div>
 

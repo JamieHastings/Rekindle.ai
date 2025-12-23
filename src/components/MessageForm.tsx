@@ -18,6 +18,7 @@ export interface FormData {
   occasion?: string;
   additionalDetails?: string;
   characterLength?: string;
+  relationshipStatus?: string;
   // Poem fields
   loverName?: string;
   yourName?: string;
@@ -99,6 +100,23 @@ const letterLengthOptions = [
   { value: 'medium', label: 'Medium' },
   { value: 'long', label: 'Long' },
 ];
+
+const relationshipStatusOptions = [
+  { value: 'broken up', label: 'Broken Up' },
+  { value: 'toxic', label: 'Toxic' },
+  { value: 'unsure', label: 'Unsure' },
+];
+
+const getMessageTypeLabel = (messageType: string): string => {
+  const typeMap: Record<string, string> = {
+    poem: 'Poem',
+    letter: 'Love Letter',
+    apology: 'Apology Message',
+    text: 'Voicenote Script',
+    giftcard: 'Gift Card',
+  };
+  return typeMap[messageType] || messageType;
+};
 
 export default function MessageForm({ onGenerate, isGenerating, onMessageTypeSelect }: MessageFormProps) {
   const [messageTypeSelected, setMessageTypeSelected] = useState(false);
@@ -186,9 +204,21 @@ export default function MessageForm({ onGenerate, isGenerating, onMessageTypeSel
             </button>
           </div>
 
+          {/* Message Type Title */}
+          <h2 className="text-2xl font-bold text-text-dark mb-6">
+            {getMessageTypeLabel(formData.messageType)}
+          </h2>
+
           {/* Poem Fields */}
           {formData.messageType === 'poem' && (
             <div className="space-y-4">
+              <Dropdown
+                label="Relationship Status"
+                options={relationshipStatusOptions}
+                value={formData.relationshipStatus || ''}
+                onChange={(value) => handleDropdownChange('relationshipStatus', value)}
+                required
+              />
               <div>
                 <label htmlFor="loverName" className="block text-base font-medium text-text-dark mb-2">
                   Lover's Name
@@ -265,6 +295,13 @@ export default function MessageForm({ onGenerate, isGenerating, onMessageTypeSel
           {/* Apology Message Fields */}
           {formData.messageType === 'apology' && (
             <div className="space-y-4">
+              <Dropdown
+                label="Relationship Status"
+                options={relationshipStatusOptions}
+                value={formData.relationshipStatus || ''}
+                onChange={(value) => handleDropdownChange('relationshipStatus', value)}
+                required
+              />
               <div>
                 <label htmlFor="apologyLoverName" className="block text-base font-medium text-text-dark mb-2">
                   Lover's Name
@@ -334,6 +371,13 @@ export default function MessageForm({ onGenerate, isGenerating, onMessageTypeSel
           {/* Gift Card Fields */}
           {formData.messageType === 'giftcard' && (
             <div className="space-y-4">
+              <Dropdown
+                label="Relationship Status"
+                options={relationshipStatusOptions}
+                value={formData.relationshipStatus || ''}
+                onChange={(value) => handleDropdownChange('relationshipStatus', value)}
+                required
+              />
               <div>
                 <label htmlFor="giftCardLoverName" className="block text-base font-medium text-text-dark mb-2">
                   Lover's Name
@@ -410,6 +454,13 @@ export default function MessageForm({ onGenerate, isGenerating, onMessageTypeSel
           {/* Voicenote Script Fields */}
           {formData.messageType === 'text' && (
             <div className="space-y-4">
+              <Dropdown
+                label="Relationship Status"
+                options={relationshipStatusOptions}
+                value={formData.relationshipStatus || ''}
+                onChange={(value) => handleDropdownChange('relationshipStatus', value)}
+                required
+              />
               <div>
                 <label htmlFor="voicenoteLoverName" className="block text-base font-medium text-text-dark mb-2">
                   Lover's Name
@@ -479,6 +530,13 @@ export default function MessageForm({ onGenerate, isGenerating, onMessageTypeSel
           {/* Letter Fields */}
           {formData.messageType === 'letter' && (
             <div className="space-y-4">
+              <Dropdown
+                label="Relationship Status"
+                options={relationshipStatusOptions}
+                value={formData.relationshipStatus || ''}
+                onChange={(value) => handleDropdownChange('relationshipStatus', value)}
+                required
+              />
               <div>
                 <label htmlFor="recipientName" className="block text-base font-medium text-text-dark mb-2">
                   Recipient Name
@@ -492,38 +550,6 @@ export default function MessageForm({ onGenerate, isGenerating, onMessageTypeSel
                   required
                   className="w-full px-3 py-2 bg-background border border-border rounded-lg text-text-light focus:outline-none focus:ring-2 focus:ring-[#CC4F4E]"
                   placeholder="e.g., Sarah"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="occasion" className="block text-base font-medium text-text-dark mb-2">
-                  Occasion
-                </label>
-                <input
-                  type="text"
-                  id="occasion"
-                  name="occasion"
-                  value={formData.occasion || ''}
-                  onChange={handleChange}
-                  required
-                  className="w-full px-3 py-2 bg-background border border-border rounded-lg text-text-light focus:outline-none focus:ring-2 focus:ring-[#CC4F4E]"
-                  placeholder="e.g., Birthday, Wedding, Anniversary"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="relationship" className="block text-base font-medium text-text-dark mb-2">
-                  Relationship
-                </label>
-                <input
-                  type="text"
-                  id="relationship"
-                  name="relationship"
-                  value={formData.relationship || ''}
-                  onChange={handleChange}
-                  required
-                  className="w-full px-3 py-2 bg-background border border-border rounded-lg text-text-light focus:outline-none focus:ring-2 focus:ring-[#CC4F4E]"
-                  placeholder="e.g., Best friend, Mother, Colleague"
                 />
               </div>
 

@@ -85,10 +85,10 @@ export function mapFormDataToBackend(formData: FormData): BackendFormData {
     case 'letter':
       backendData = {
         name: formData.recipientName || '',
-        relationshipLength: formData.relationship || 'Not specified',
+        relationshipLength: 'Not specified',
         tone: formData.tone || 'warm',
         messageType: messageTypeMap[messageType],
-        occasion: formData.occasion,
+        occasion: undefined,
         additionalDetails: `${formData.keyPoints ? `Key points: ${formData.keyPoints}. ` : ''}${formData.additionalDetails || ''}`,
         characterLength: lengthMap[formData.length || 'medium'],
       };
