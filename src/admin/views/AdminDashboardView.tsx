@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Users, DollarSign, FileText, TrendingUp } from 'lucide-react';
-import { supabase } from '../../lib/supabase';
+import { Users, DollarSign, FileText, TrendingUp, Star } from 'lucide-react';
+import { supabase, UserFeedback, Profile } from '../../lib/supabase';
 
 interface DashboardStats {
   totalUsers: number;
@@ -9,6 +9,12 @@ interface DashboardStats {
   totalMessages: number;
   newUsersThisMonth: number;
   revenueThisMonth: number;
+  totalFeedback: number;
+  averageRating: number;
+}
+
+interface RecentFeedbackItem extends UserFeedback {
+  user_email?: string;
 }
 
 export const AdminDashboardView: React.FC = () => {
@@ -19,8 +25,11 @@ export const AdminDashboardView: React.FC = () => {
     totalMessages: 0,
     newUsersThisMonth: 0,
     revenueThisMonth: 0,
+    totalFeedback: 0,
+    averageRating: 0,
   });
   const [loading, setLoading] = useState(true);
+  const [recentFeedback, setRecentFeedback] = useState<RecentFeedbackItem[]>([]);
 
   useEffect(() => {
     fetchDashboardStats();
@@ -32,11 +41,21 @@ export const AdminDashboardView: React.FC = () => {
       const now = new Date();
       const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-      const [usersResult, templatesResult, messagesResult, paymentsResult, newUsersResult, recentPaymentsResult] = await Promise.all([
+      const [
+        usersResult,
+        templatesResult,
+        messagesResult,
+        paymentsResult,
+        newUsersResult,
+        recentPaymentsResult,
+        feedbackResult,
+        feedbackData,
+        recentFeedbackResult
+      ] = await Promise.all([
         supabase.from('profiles').select('id', { count: 'exact', head: true }),
-        supabase.from('message_templates').select('id', { count: 'exact', head: true }),
+        supabase.from('design_templates').select('id', { count: 'exact', head: true }),
         supabase.from('generated_messages').select('id', { count: 'exact', head: true }),
-        supabase.from('stripe_payments').select('amount_cents').eq('status', 'completed'),
+        supabase.from('stripe_payments').select('amount_cents').eq('status', 'succeeded'),
         supabase
           .from('profiles')
           .select('id', { count: 'exact', head: true })
@@ -44,12 +63,37 @@ export const AdminDashboardView: React.FC = () => {
         supabase
           .from('stripe_payments')
           .select('amount_cents')
-          .eq('status', 'completed')
+          .eq('status', 'succeeded')
           .gte('created_at', firstOfMonth.toISOString()),
+        supabase.from('user_feedback').select('id', { count: 'exact', head: true }),
+        supabase.from('user_feedback').select('rating'),
+        supabase
+          .from('user_feedback')
+          .select('*, user_id')
+          .order('created_at', { ascending: false })
+          .limit(5)
       ]);
 
       const totalRevenue = paymentsResult.data?.reduce((sum, p) => sum + (p.amount_cents || 0), 0) || 0;
       const revenueThisMonth = recentPaymentsResult.data?.reduce((sum, p) => sum + (p.amount_cents || 0), 0) || 0;
+
+      const averageRating = feedbackData.data && feedbackData.data.length > 0
+        ? feedbackData.data.reduce((sum, f) => sum + f.rating, 0) / feedbackData.data.length
+        : 0;
+
+      if (recentFeedbackResult.data) {
+        const feedbackWithEmails = await Promise.all(
+          recentFeedbackResult.data.map(async (feedback) => {
+            const { data: profileData } = await supabase
+              .from('profiles')
+              .select('email')
+              .eq('id', feedback.user_id)
+              .single();
+            return { ...feedback, user_email: profileData?.email };
+          })
+        );
+        setRecentFeedback(feedbackWithEmails);
+      }
 
       setStats({
         totalUsers: usersResult.count || 0,
@@ -58,6 +102,8 @@ export const AdminDashboardView: React.FC = () => {
         totalRevenue: totalRevenue / 100,
         newUsersThisMonth: newUsersResult.count || 0,
         revenueThisMonth: revenueThisMonth / 100,
+        totalFeedback: feedbackResult.count || 0,
+        averageRating,
       });
     } catch (error) {
       console.error('Error fetching dashboard stats:', error);
@@ -81,7 +127,7 @@ export const AdminDashboardView: React.FC = () => {
         <p className="text-[#F3DADA]">Welcome to the Rekindle.ai admin dashboard</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
         <div className="bg-white/5 rounded-lg p-6 border border-white/10">
           <div className="flex items-center justify-between mb-4">
             <div className="p-3 bg-blue-500/20 rounded-lg">
@@ -123,6 +169,17 @@ export const AdminDashboardView: React.FC = () => {
           <h3 className="text-2xl font-bold mb-1">{stats.totalMessages}</h3>
           <p className="text-[#F3DADA] text-sm">Messages Generated</p>
         </div>
+
+        <div className="bg-white/5 rounded-lg p-6 border border-white/10">
+          <div className="flex items-center justify-between mb-4">
+            <div className="p-3 bg-yellow-500/20 rounded-lg">
+              <Star className="w-6 h-6 text-yellow-400" />
+            </div>
+            <span className="text-sm text-[#F3DADA]">{stats.totalFeedback} reviews</span>
+          </div>
+          <h3 className="text-2xl font-bold mb-1">{stats.averageRating.toFixed(1)} / 5.0</h3>
+          <p className="text-[#F3DADA] text-sm">Average Rating</p>
+        </div>
       </div>
 
       <div className="bg-white/5 rounded-lg p-6 border border-white/10">
@@ -145,21 +202,32 @@ export const AdminDashboardView: React.FC = () => {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white/5 rounded-lg p-6 border border-white/10">
-          <h3 className="text-xl font-bold mb-4">Recent Activity</h3>
-          <div className="space-y-3">
-            <div className="flex items-center justify-between py-2 border-b border-white/5">
-              <span className="text-[#F3DADA]">New user registration</span>
-              <span className="text-sm">Just now</span>
+          <h3 className="text-xl font-bold mb-4">Recent Feedback</h3>
+          {recentFeedback.length === 0 ? (
+            <p className="text-[#F3DADA] text-sm">No feedback yet</p>
+          ) : (
+            <div className="space-y-3">
+              {recentFeedback.map((feedback) => (
+                <div key={feedback.id} className="py-2 border-b border-white/5">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-sm font-medium">{feedback.user_email || 'Unknown User'}</span>
+                    <div className="flex items-center gap-1">
+                      {[...Array(5)].map((_, i) => (
+                        <Star
+                          key={i}
+                          size={14}
+                          className={i < feedback.rating ? 'fill-yellow-400 text-yellow-400' : 'text-gray-600'}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                  {feedback.comment && (
+                    <p className="text-[#F3DADA] text-sm line-clamp-2">{feedback.comment}</p>
+                  )}
+                </div>
+              ))}
             </div>
-            <div className="flex items-center justify-between py-2 border-b border-white/5">
-              <span className="text-[#F3DADA]">Payment received</span>
-              <span className="text-sm">5 min ago</span>
-            </div>
-            <div className="flex items-center justify-between py-2 border-b border-white/5">
-              <span className="text-[#F3DADA]">Template uploaded</span>
-              <span className="text-sm">1 hour ago</span>
-            </div>
-          </div>
+          )}
         </div>
 
         <div className="bg-white/5 rounded-lg p-6 border border-white/10">

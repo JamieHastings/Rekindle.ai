@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Search, Heart, Calendar, MessageSquare, Sparkles } from 'lucide-react';
+import { Search, Heart, Calendar, MessageSquare, Sparkles, RefreshCw, MessageCircle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
+import FeedbackModal from '../components/FeedbackModal';
+import { N8nService } from '../services/n8nService';
 
 interface GeneratedMessage {
   id: string;
@@ -37,6 +39,8 @@ export default function Dashboard() {
     monthlyMessages: 0,
     favoriteCount: 0,
   });
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+  const [isRegenerating, setIsRegenerating] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -176,6 +180,79 @@ export default function Dashboard() {
       month: 'short',
       day: 'numeric',
     });
+  };
+
+  const regenerateMessage = async (message: GeneratedMessage) => {
+    if (!user || !profile) return;
+
+    if (profile.tokens < 2) {
+      alert('You need at least 2 tokens to regenerate a message');
+      return;
+    }
+
+    if (!confirm('Regenerate this message? This will cost 2 tokens.')) {
+      return;
+    }
+
+    setIsRegenerating(true);
+
+    try {
+      const requestData = {
+        messageType: message.message_type,
+        name: message.recipient_name,
+        relationshipLength: message.relationship_length,
+        tone: message.tone,
+        characterLength: 'medium',
+        occasion: message.occasion || '',
+        additionalDetails: ''
+      };
+
+      const result = await N8nService.generateMessage(requestData);
+      const newContent = result.message;
+
+      const { data: updatedProfile, error: profileError } = await supabase
+        .from('profiles')
+        .update({ tokens: profile.tokens - 2 })
+        .eq('id', user.id)
+        .select()
+        .single();
+
+      if (profileError) throw profileError;
+
+      const { error: transactionError } = await supabase
+        .from('token_transactions')
+        .insert({
+          user_id: user.id,
+          transaction_type: 'usage',
+          amount: -2,
+          description: 'Message regeneration'
+        });
+
+      if (transactionError) throw transactionError;
+
+      const { error: updateError } = await supabase
+        .from('generated_messages')
+        .update({ generated_content: newContent })
+        .eq('id', message.id);
+
+      if (updateError) throw updateError;
+
+      setMessages(prev =>
+        prev.map(m => m.id === message.id ? { ...m, generated_content: newContent } : m)
+      );
+
+      if (selectedMessage?.id === message.id) {
+        setSelectedMessage({ ...selectedMessage, generated_content: newContent });
+      }
+
+      alert('Message regenerated successfully!');
+      await fetchMessages();
+    } catch (error: any) {
+      console.error('Error regenerating message:', error);
+      alert(error.message || 'Failed to regenerate message');
+    } finally {
+      setIsRegenerating(false);
+    }
   };
 
   if (loading) {
@@ -438,6 +515,23 @@ export default function Dashboard() {
                 Download
               </button>
               <button
+                onClick={() => {
+                  setShowFeedbackModal(true);
+                }}
+                className="px-4 py-2 bg-green-500 text-white rounded-lg hover:opacity-90 transition-all font-medium flex items-center gap-2"
+              >
+                <MessageCircle size={18} />
+                Give Feedback
+              </button>
+              <button
+                onClick={() => regenerateMessage(selectedMessage)}
+                disabled={isRegenerating || (profile?.tokens ?? 0) < 2}
+                className="px-4 py-2 bg-purple-500 text-white rounded-lg hover:opacity-90 transition-all font-medium flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <RefreshCw size={18} className={isRegenerating ? 'animate-spin' : ''} />
+                Regenerate (2 tokens)
+              </button>
+              <button
                 onClick={() => deleteMessage(selectedMessage.id)}
                 className="px-4 py-2 bg-red-500 text-white rounded-lg hover:opacity-90 transition-all font-medium"
               >
@@ -452,6 +546,18 @@ export default function Dashboard() {
             </div>
           </motion.div>
         </div>
+      )}
+
+      {selectedMessage && (
+        <FeedbackModal
+          isOpen={showFeedbackModal}
+          onClose={() => setShowFeedbackModal(false)}
+          messageId={selectedMessage.id}
+          onFeedbackSubmitted={() => {
+            setShowFeedbackModal(false);
+            alert('Thank you for your feedback!');
+          }}
+        />
       )}
     </div>
   );
