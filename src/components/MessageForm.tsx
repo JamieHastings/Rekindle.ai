@@ -382,7 +382,8 @@ export default function MessageForm({ onGenerate, isGenerating, onMessageTypeSel
 
               <GiftCardTemplateSelector
                 onTemplateSelect={(template) => handleDropdownChange('giftCardTemplate', template)}
-                selectedTemplate={formData.giftCardTemplate || 'romantic-hearts'}
+                selectedTemplate={formData.giftCardTemplate || ''}
+                category="gift_card"
               />
 
               <div>
@@ -547,7 +548,8 @@ export default function MessageForm({ onGenerate, isGenerating, onMessageTypeSel
 
               <GiftCardTemplateSelector
                 onTemplateSelect={(template) => handleDropdownChange('giftCardTemplate', template)}
-                selectedTemplate={formData.giftCardTemplate || 'romantic-hearts'}
+                selectedTemplate={formData.giftCardTemplate || ''}
+                category="love_letter"
               />
 
               <div>

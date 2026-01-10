@@ -1,45 +1,73 @@
-import { Check } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Check, Loader2 } from 'lucide-react';
+import { supabase } from '../lib/supabase';
 
 interface GiftCardTemplateSelectorProps {
   onTemplateSelect: (template: string) => void;
   selectedTemplate: string;
+  category?: 'love_letter' | 'gift_card' | 'poem' | 'general';
 }
 
-const templates = [
-  {
-    id: 'romantic-hearts',
-    name: 'Romantic Hearts',
-    preview: 'bg-gradient-to-br from-pink-50 to-red-50',
-    border: 'border-red-200',
-    accent: 'text-red-600'
-  },
-  {
-    id: 'elegant-gold',
-    name: 'Elegant Gold',
-    preview: 'bg-gradient-to-br from-amber-50 to-yellow-50',
-    border: 'border-amber-300',
-    accent: 'text-amber-700'
-  },
-  {
-    id: 'modern-minimal',
-    name: 'Modern Minimal',
-    preview: 'bg-gradient-to-br from-gray-50 to-slate-100',
-    border: 'border-gray-300',
-    accent: 'text-gray-700'
-  },
-  {
-    id: 'floral-spring',
-    name: 'Floral Spring',
-    preview: 'bg-gradient-to-br from-green-50 to-emerald-50',
-    border: 'border-green-300',
-    accent: 'text-green-700'
-  }
-];
+interface Template {
+  id: string;
+  name: string;
+  preview_gradient: string;
+  border_color: string;
+  accent_color: string;
+  image_url: string;
+}
 
 export default function GiftCardTemplateSelector({
   onTemplateSelect,
-  selectedTemplate
+  selectedTemplate,
+  category = 'general'
 }: GiftCardTemplateSelectorProps) {
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchTemplates();
+  }, [category]);
+
+  const fetchTemplates = async () => {
+    try {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from('design_templates')
+        .select('id, name, preview_gradient, border_color, accent_color, image_url')
+        .eq('is_active', true)
+        .or(`category.eq.${category},category.eq.general`)
+        .order('display_order', { ascending: true });
+
+      if (error) throw error;
+      setTemplates(data || []);
+
+      if (data && data.length > 0 && !selectedTemplate) {
+        onTemplateSelect(data[0].id);
+      }
+    } catch (error) {
+      console.error('Error fetching templates:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-8">
+        <Loader2 className="w-6 h-6 text-[#CC4F4E] animate-spin" />
+      </div>
+    );
+  }
+
+  if (templates.length === 0) {
+    return (
+      <div className="text-center py-4 text-text-light">
+        No templates available
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <div>
@@ -54,17 +82,28 @@ export default function GiftCardTemplateSelector({
               onClick={() => onTemplateSelect(template.id)}
               className={`relative p-4 rounded-lg border-2 transition-all ${
                 selectedTemplate === template.id
-                  ? `${template.border} ring-2 ring-offset-2 ring-[#CC4F4E]`
+                  ? `${template.border_color} ring-2 ring-offset-2 ring-[#CC4F4E]`
                   : 'border-border hover:border-[#CC4F4E]'
               }`}
             >
-              <div
-                className={`${template.preview} h-24 rounded-md border ${template.border} mb-2 flex items-center justify-center`}
-              >
-                <span className={`text-sm font-medium ${template.accent}`}>
-                  {template.name}
-                </span>
-              </div>
+              {template.image_url ? (
+                <div className="h-24 rounded-md overflow-hidden mb-2">
+                  <img
+                    src={template.image_url}
+                    alt={template.name}
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+              ) : (
+                <div
+                  className={`${template.preview_gradient} h-24 rounded-md border ${template.border_color} mb-2 flex items-center justify-center`}
+                >
+                  <span className={`text-sm font-medium ${template.accent_color}`}>
+                    {template.name}
+                  </span>
+                </div>
+              )}
+              <p className="text-sm text-text-dark text-center">{template.name}</p>
               {selectedTemplate === template.id && (
                 <div className="absolute top-2 right-2 bg-[#CC4F4E] text-white rounded-full p-1">
                   <Check className="w-4 h-4" />
