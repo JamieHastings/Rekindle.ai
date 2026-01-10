@@ -1,9 +1,9 @@
 // src/admin/AdminLayout.tsx
 import React from 'react';
-import { LogOut, Home as HomeIcon, LayoutDashboard, FileText, BarChart3, Settings } from 'lucide-react';
+import { LogOut, Home as HomeIcon, LayoutDashboard, FileText, BarChart3, Settings, MessageSquare } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
-type AdminView = 'dashboard' | 'templates' | 'analytics' | 'settings';
+type AdminView = 'dashboard' | 'messages' | 'templates' | 'analytics' | 'settings';
 
 interface AdminLayoutProps {
   children?: React.ReactNode;
@@ -100,8 +100,8 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
             <button
               onClick={() => handleViewChange('dashboard')}
               className={`px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 ${
-                activeView === 'dashboard' 
-                  ? 'bg-white/20 text-white' 
+                activeView === 'dashboard'
+                  ? 'bg-white/20 text-white'
                   : 'bg-white/10 hover:bg-white/15 text-[#F3DADA]'
               }`}
             >
@@ -109,10 +109,21 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
               <span>Admin Dashboard</span>
             </button>
             <button
+              onClick={() => handleViewChange('messages')}
+              className={`px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 ${
+                activeView === 'messages'
+                  ? 'bg-white/20 text-white'
+                  : 'bg-white/10 hover:bg-white/15 text-[#F3DADA]'
+              }`}
+            >
+              <MessageSquare className="w-5 h-5" />
+              <span>Messages</span>
+            </button>
+            <button
               onClick={() => handleViewChange('templates')}
               className={`px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 ${
-                activeView === 'templates' 
-                  ? 'bg-white/20 text-white' 
+                activeView === 'templates'
+                  ? 'bg-white/20 text-white'
                   : 'bg-white/10 hover:bg-white/15 text-[#F3DADA]'
               }`}
             >

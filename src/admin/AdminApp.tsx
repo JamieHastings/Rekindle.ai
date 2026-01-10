@@ -2,11 +2,12 @@
 import { useState } from 'react';
 import { AdminLayout } from './AdminLayout';
 import { AdminDashboardView } from './views/AdminDashboardView';
+import { AdminMessagesView } from './views/AdminMessagesView';
 import { AdminTemplatesView } from './views/AdminTemplatesView';
 import { AdminAnalyticsView } from './views/AdminAnalyticsView';
 import { AdminSettingsView } from './views/AdminSettingsView';
 
-type AdminView = 'dashboard' | 'templates' | 'analytics' | 'settings';
+type AdminView = 'dashboard' | 'messages' | 'templates' | 'analytics' | 'settings';
 
 interface AdminAppProps {
   onNavigate?: (view: 'home' | 'generator' | 'dashboard' | 'admin') => void;
@@ -19,6 +20,8 @@ export default function AdminApp({ onNavigate }: AdminAppProps){
     switch (activeView) {
       case 'dashboard':
         return <AdminDashboardView />;
+      case 'messages':
+        return <AdminMessagesView />;
       case 'templates':
         return <AdminTemplatesView />;
       case 'analytics':
