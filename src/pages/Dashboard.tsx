@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
-import { Search, Heart, Calendar, MessageSquare, Sparkles } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Search, Heart, Calendar, MessageSquare, Sparkles, RotateCcw, Loader2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
+import TokenPurchaseModal from '../components/TokenPurchaseModal';
 
 interface GeneratedMessage {
   id: string;
@@ -57,6 +58,9 @@ export default function Dashboard() {
     monthlyMessages: 0,
     favoriteCount: 0,
   });
+  const [showTokenModal, setShowTokenModal] = useState(false);
+  const [isRegenerating, setIsRegenerating] = useState(false);
+  const [regenerationError, setRegenerationError] = useState('');
 
   useEffect(() => {
     if (user) {
@@ -197,6 +201,76 @@ export default function Dashboard() {
       month: 'short',
       day: 'numeric',
     });
+  };
+
+  const regenerateMessage = async (messageId: string) => {
+    if (!user || !profile) return;
+
+    const REGENERATE_TOKEN_COST = 2;
+
+    if (profile.tokens < REGENERATE_TOKEN_COST) {
+      setRegenerationError(`You need ${REGENERATE_TOKEN_COST} tokens to regenerate this message.`);
+      setShowTokenModal(true);
+      return;
+    }
+
+    setIsRegenerating(true);
+    setRegenerationError('');
+
+    try {
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+
+      if (sessionError || !session) {
+        throw new Error('Authentication session expired. Please sign in again.');
+      }
+
+      const { data: result, error: invokeError } = await supabase.functions.invoke('regenerate-message', {
+        body: {
+          messageId: messageId,
+        },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+
+      if (invokeError) {
+        if (invokeError.message?.includes('Insufficient tokens') || invokeError.status === 402) {
+          setRegenerationError('Insufficient tokens. Please purchase more tokens to continue.');
+          setShowTokenModal(true);
+          return;
+        }
+        throw invokeError;
+      }
+
+      if (!result || !result.newMessage) {
+        throw new Error('No message content returned');
+      }
+
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === messageId ? { ...m, generated_content: result.newMessage } : m
+        )
+      );
+
+      if (selectedMessage?.id === messageId) {
+        setSelectedMessage({ ...selectedMessage, generated_content: result.newMessage });
+      }
+
+      await auth?.refreshProfile();
+
+      setRegenerationError('');
+    } catch (err) {
+      console.error('Error regenerating message:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Failed to regenerate message';
+      setRegenerationError(errorMessage);
+    } finally {
+      setIsRegenerating(false);
+    }
+  };
+
+  const handleTokenPurchase = (tokens: number) => {
+    setShowTokenModal(false);
+    auth?.refreshProfile();
   };
 
   if (loading) {
@@ -440,9 +514,69 @@ export default function Dashboard() {
             </div>
 
             <div className="bg-background border border-border rounded-lg p-4 mb-4">
-              <p className="text-text-dark whitespace-pre-wrap leading-relaxed">
-                {selectedMessage.generated_content}
-              </p>
+              <AnimatePresence mode="wait">
+                {isRegenerating ? (
+                  <motion.div
+                    key="regenerating"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="flex flex-col items-center justify-center py-8"
+                  >
+                    <Loader2 className="w-12 h-12 text-[#CC4F4E] animate-spin mb-4" />
+                    <p className="text-text-light">Regenerating your message...</p>
+                  </motion.div>
+                ) : (
+                  <motion.p
+                    key="content"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="text-text-dark whitespace-pre-wrap leading-relaxed"
+                  >
+                    {selectedMessage.generated_content}
+                  </motion.p>
+                )}
+              </AnimatePresence>
+            </div>
+
+            {regenerationError && (
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-red-500 bg-opacity-10 border border-red-500 rounded-lg p-3 mb-4"
+              >
+                <p className="text-red-500 text-sm">{regenerationError}</p>
+              </motion.div>
+            )}
+
+            <div className="bg-background border border-border rounded-lg p-4 mb-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <RotateCcw className="w-5 h-5 text-text-light" />
+                  <div>
+                    <p className="text-sm font-medium text-text-dark">Need a different version?</p>
+                    <p className="text-xs text-text-light">Costs 2 tokens to regenerate</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => regenerateMessage(selectedMessage.id)}
+                  disabled={isRegenerating || !profile || profile.tokens < 2}
+                  className="px-4 py-2 bg-[#CC4F4E] text-black rounded-lg hover:opacity-90 transition-all font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {isRegenerating ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Regenerating...
+                    </>
+                  ) : (
+                    <>
+                      <RotateCcw className="w-4 h-4" />
+                      Regenerate
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
 
             <div className="flex flex-wrap gap-2">
@@ -474,6 +608,16 @@ export default function Dashboard() {
           </motion.div>
         </div>
       )}
+
+      <TokenPurchaseModal
+        isOpen={showTokenModal}
+        onClose={() => {
+          setShowTokenModal(false);
+          setRegenerationError('');
+        }}
+        onPurchase={handleTokenPurchase}
+        currentTokens={profile?.tokens || 0}
+      />
     </div>
   );
 }
