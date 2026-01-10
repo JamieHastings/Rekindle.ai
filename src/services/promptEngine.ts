@@ -113,6 +113,35 @@ INSTRUCTIONS:
 - Do not add labels like "Gift Card:" — output only the message.
 
 Now write the gift card message.`,
+
+  rekindling: `You are an expert at writing heartfelt messages to rekindle romantic relationships.
+
+RELATIONSHIP CONTEXT:
+- Relationship status: {{ relationship_status }}
+- Lover's name: {{ lover_name }}
+{% if relationship_length %}
+- Relationship length: {{ relationship_length }}
+{% endif %}
+- Tone: {{ tone }}
+{% if additional_details %}
+- Additional context: {{ additional_details }}
+{% endif %}
+{% if what_happened %}
+- What happened: {{ what_happened }}
+{% endif %}
+
+INSTRUCTIONS:
+- Write a sincere, hopeful message to rekindle a romantic relationship with {{ lover_name }}.
+- This is about getting back together after a breakup or time apart.
+- Express genuine feelings and reflection on what went wrong.
+- Show personal growth and understanding.
+- Convey hope for a fresh start while acknowledging the past.
+- Be sincere, vulnerable, and hopeful (not desperate or manipulative).
+- Match the tone: {{ tone }}.
+- Keep it personal, authentic, and emotionally grounded.
+- Do not include formatting like "**Rekindling Message:**". Output only the message itself.
+
+Now write the rekindling message.`,
 };
 
 // Template file names mapped to message types (matching actual form messageType values)
@@ -122,6 +151,10 @@ const TEMPLATE_MAP: Record<string, string> = {
   apology: "apology",
   text: "text",
   giftcard: "giftcard",
+  rekindling: "rekindling",
+  birthday: "letter", // Birthday messages use the letter template
+  support: "text", // Support messages use the text template
+  closure: "letter", // Closure messages use the letter template
 };
 
 /**
@@ -202,8 +235,44 @@ function mapFormDataToTemplateVars(
       templateVars.short_description = formData.giftCardDescription || "";
       break;
 
+    case "rekindling":
+      // Rekindling uses backend form data format (from formMapper)
+      templateVars.lover_name = formData.name || formData.loverName || "";
+      templateVars.relationship_length = formData.relationshipLength || "";
+      templateVars.tone = formData.tone || "heartfelt";
+      templateVars.additional_details = formData.additionalDetails || "";
+      templateVars.what_happened = formData.whatHappened || "";
+      break;
+
+    case "birthday":
+      // Birthday messages use letter template structure
+      templateVars.recipient_name = formData.name || formData.recipientName || "";
+      templateVars.tone = formData.tone || "warm";
+      templateVars.length = formData.length || formData.characterLength || "medium";
+      templateVars.key_points = "";
+      templateVars.additional_details = formData.additionalDetails || "";
+      break;
+
+    case "support":
+      // Support messages use text template structure
+      templateVars.lover_name = formData.name || "";
+      templateVars.significant_message = "";
+      templateVars.length = formData.length || formData.characterLength || "medium";
+      templateVars.tone = formData.tone || "conversational";
+      templateVars.short_description = formData.additionalDetails || "";
+      break;
+
+    case "closure":
+      // Closure messages use letter template structure
+      templateVars.recipient_name = formData.name || formData.recipientName || "";
+      templateVars.tone = formData.tone || "sincere";
+      templateVars.length = formData.length || formData.characterLength || "medium";
+      templateVars.key_points = "";
+      templateVars.additional_details = formData.additionalDetails || "";
+      break;
+
     default:
-      throw new Error(`Unknown message type: ${messageType}`);
+      throw new Error(`Unknown message type: ${messageType}. Valid types: poem, letter, apology, text, giftcard, rekindling, birthday, support, closure`);
   }
 
   return templateVars;
@@ -211,8 +280,8 @@ function mapFormDataToTemplateVars(
 
 /**
  * Renders a prompt template with form data
- * @param messageType - The message type (poem, letter, apology, text, giftcard)
- * @param formData - The form data from MessageForm component
+ * @param messageType - The message type (poem, letter, apology, text, giftcard, rekindling, birthday, support, closure)
+ * @param formData - The form data from MessageForm component or backend form data
  * @returns The rendered prompt string ready to send to OpenAI
  * @throws Error if message type is invalid or template rendering fails
  */

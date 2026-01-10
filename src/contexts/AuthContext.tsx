@@ -41,6 +41,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   // Load profile from database
   const loadProfile = async (userId: string) => {
     try {
+      // Wait a moment for trigger to complete (if just signed up)
+      await new Promise(resolve => setTimeout(resolve, 500));
+
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
@@ -48,40 +51,42 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         .single();
 
       if (error) {
-        // If profile doesn't exist, try to create it
+        console.error('Error loading profile:', error);
+
+        // If profile doesn't exist after 500ms, wait and retry once
         if (error.code === 'PGRST116') {
-          // Profile not found - create it
-          const { data: userData } = await supabase.auth.getUser();
-          
-          if (userData?.user) {
-            const { data: newProfile, error: createError } = await supabase
-              .from('profiles')
-              .insert({
-                id: userId,
-                email: userData.user.email || '',
-                full_name: userData.user.user_metadata?.full_name || null,
-                tokens: 3, // Give new users 3 free tokens as signup bonus
-              })
-              .select()
-              .single();
+          console.log('Profile not found, retrying in 1 second...');
+          await new Promise(resolve => setTimeout(resolve, 1000));
 
-            if (createError) {
-              console.error('Error creating profile:', createError);
-              setProfile(null);
-              return;
-            }
+          const { data: retryData, error: retryError } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', userId)
+            .single();
 
-            setProfile(newProfile as Profile);
+          if (retryError) {
+            console.error('Profile still missing after retry. This is a trigger issue.');
+            // Don't show alert here - it would be too aggressive
+            // The signup flow will handle user-facing errors
+            setProfile(null);
             return;
           }
+
+          console.log('Profile loaded after retry:', { 
+            id: retryData.id, 
+            email: retryData.email, 
+            is_admin: retryData.is_admin,
+            tokens: retryData.tokens 
+          });
+          setProfile(retryData as Profile);
+          return;
         }
-        
-        console.error('Error loading profile:', error);
+
         setProfile(null);
         return;
       }
 
-      console.log('Profile loaded:', { 
+      console.log('Profile loaded successfully:', { 
         id: data.id, 
         email: data.email, 
         is_admin: data.is_admin,
@@ -89,7 +94,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       });
       setProfile(data as Profile);
     } catch (err) {
-      console.error('Error loading profile:', err);
+      console.error('Exception loading profile:', err);
       setProfile(null);
     }
   };
@@ -213,56 +218,34 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         console.log('✅ Successfully signed in after signup');
       }
 
-      // Step 4: Wait for database trigger to create profile, then verify/ensure it exists
+      // Step 4: Wait for database trigger to create profile, then verify it exists
       // Only check if we have a session (needed for RLS)
       if (hasSession) {
         console.log('⏳ Waiting for profile creation (trigger)...');
-        await new Promise(resolve => setTimeout(resolve, 1500)); // Wait for trigger
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait for trigger
 
         try {
-          // Check if profile exists
+          // Verify profile exists
           const { data: existingProfile, error: profileError } = await supabase
             .from('profiles')
-            .select('id')
+            .select('*')
             .eq('id', userId)
             .single();
 
-          if (existingProfile && !profileError) {
-            console.log('✅ Profile exists (created by trigger)');
-          } else {
-            console.log('⚠️ Profile not found, attempting to create manually...');
-            // Fallback: Create profile manually if trigger didn't work
-            const { data: newProfile, error: createError } = await supabase
-              .from('profiles')
-              .insert({
-                id: userId,
-                email: data.user.email || email,
-                full_name: data.user.user_metadata?.full_name || null,
-                tokens: 3, // Give new users 3 free tokens
-              })
-              .select()
-              .single();
-
-            if (createError) {
-              // If it's a unique violation, profile already exists (race condition)
-              if (createError.code === '23505') {
-                console.log('✅ Profile already exists (race condition handled)');
-              } else {
-                console.error('❌ Failed to create profile:', createError);
-                // Don't fail signup, profile will be created by loadProfile later
-              }
-            } else {
-              console.log('✅ Profile created manually:', newProfile?.id);
-            }
+          if (profileError || !existingProfile) {
+            console.error('❌ Profile not created by trigger');
+            // Return error - the signup component will handle showing the alert
+            return { error: 'Account created but profile setup failed. Please try logging in or contact support.' };
           }
+
+          console.log('✅ Profile confirmed (created by trigger):', existingProfile.id);
         } catch (profileCheckError) {
-          console.error('❌ Error checking/creating profile:', profileCheckError);
-          // Don't fail signup, profile will be created by loadProfile when user signs in
+          console.error('❌ Error checking profile:', profileCheckError);
+          return { error: 'Account created but profile verification failed. Please try logging in.' };
         }
       }
 
       // Step 5: Profile will be loaded by onAuthStateChange listener
-      // If it doesn't exist, loadProfile will create it as a fallback
       console.log('✅ Signup complete');
       return { error: null };
     } catch (err) {

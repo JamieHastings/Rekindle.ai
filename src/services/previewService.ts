@@ -1,127 +1,83 @@
-import { SessionManager } from '../utils/sessionManager';
-import { renderPromptFromForm } from './promptEngine';
-import { generateAIText } from './openaiService';
-import { FormData } from '../components/MessageForm';
+// src/services/previewService.ts
 
-const PREVIEW_LIMIT = 3;
-const PREVIEW_LENGTH = 200; // Characters to show in preview
+import { supabase } from '../lib/supabase';
+import { SessionManager, MAX_PREVIEWS } from '../utils/sessionManager';
+import { generateAIText } from './openaiService';
+import { renderPromptFromForm } from './promptEngine';
 
 interface PreviewResponse {
   previewId: string;
   partialContent: string;
-  expiresAt: string;
+  fullMessage: string;
   remainingPreviews: number;
 }
 
-export class PreviewService {
-  /**
-   * Generate a preview message using OpenAI (for non-logged-in users)
-   * This replaces the old Supabase Edge Function call
-   */
-  static async generatePreview(formData: any): Promise<PreviewResponse> {
+export const PreviewService = {
+  generatePreview: async (formData: any): Promise<PreviewResponse> => {
     const session = SessionManager.getOrCreateSession();
 
     if (!session.canGeneratePreview) {
-      throw new Error('Preview limit reached. Please sign up to continue!');
+      throw new Error('Preview limit reached. Please sign up to continue.');
     }
+
+    console.log('🔄 Generating preview with session:', session.id);
+
+    // Generate the full message using AI
+    // Note: renderPromptFromForm requires messageType and formData
+    // We'll extract messageType from formData and pass both
+    const messageType = formData.messageType || 'poem';
+    const prompt = await renderPromptFromForm(messageType, formData);
+    // Note: generateAIText only takes one parameter (prompt), not messageType
+    const fullMessage = await generateAIText(prompt);
+
+    // Create preview (first 150 characters)
+    const previewLength = 150;
+    const partialContent = fullMessage.substring(0, previewLength) + '...';
+
+    // Try to save preview to database
+    let savedPreviewId = '';
 
     try {
-      // Convert backend form data to FormData format
-      const messageTypeMap: Record<string, string> = {
-        'rekindling': 'poem',
-        'birthday': 'letter',
-        'apology': 'apology',
-        'support': 'text',
-      };
+      console.log('💾 Attempting to save preview to database...');
 
-      const frontendMessageType = messageTypeMap[formData.messageType] || 'poem';
+      const { data: savedPreview, error } = await supabase
+        .from('preview_messages')
+        .insert({
+          user_id: null,
+          session_id: session.id,
+          message_type: formData.messageType,
+          input_data: formData,
+          preview_text: fullMessage, // Changed from output_text
+          // Removed is_preview since column doesn't exist
+        })
+        .select()
+        .single();
 
-      // Create FormData object from backend data
-      const frontendFormData: FormData = {
-        messageType: frontendMessageType,
-        relationshipStatus: 'unsure', // Default for preview
-        // Map fields based on message type
-        ...(frontendMessageType === 'poem' && {
-          loverName: formData.name,
-          yourName: 'You',
-          whatHappened: formData.additionalDetails || '',
-          poemTone: formData.tone,
-          shortDescription: formData.additionalDetails || '',
-        }),
-        ...(frontendMessageType === 'letter' && {
-          recipientName: formData.name,
-          tone: formData.tone,
-          length: formData.characterLength,
-          keyPoints: formData.additionalDetails || '',
-          additionalDetails: formData.additionalDetails || '',
-        }),
-        ...(frontendMessageType === 'apology' && {
-          apologyLoverName: formData.name,
-          significantMessage: formData.additionalDetails || '',
-          apologyLength: formData.characterLength,
-          apologyTone: formData.tone,
-          apologyDescription: formData.additionalDetails || '',
-        }),
-        ...(frontendMessageType === 'text' && {
-          voicenoteLoverName: formData.name,
-          voicenoteSignificantMessage: formData.additionalDetails || '',
-          voicenoteLength: formData.characterLength,
-          voicenoteTone: formData.tone,
-          voicenoteDescription: formData.additionalDetails || '',
-        }),
-      };
-
-      // Step 1: Render prompt from template
-      const prompt = await renderPromptFromForm(frontendMessageType, frontendFormData);
-
-      // Step 2: Generate full message using OpenAI
-      const fullContent = await generateAIText(prompt);
-
-      // Step 3: Create preview (truncate to first 200 characters)
-      const partialContent = fullContent.substring(0, PREVIEW_LENGTH).trim() + '...';
-
-      // Step 4: Increment preview count
-      SessionManager.incrementPreviewCount();
-
-      // Step 5: Calculate remaining previews
-      const remainingPreviews = Math.max(0, PREVIEW_LIMIT - session.previewCount);
-
-      // Step 6: Create preview ID (simple timestamp-based ID for client-side storage)
-      const previewId = `preview_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-
-      // Store full content in session storage (for unlock functionality)
-      try {
-        const previewData = {
-          id: previewId,
-          fullContent,
-          partialContent,
-          messageType: formData.messageType,
-          tone: formData.tone,
-          recipientName: formData.name,
-          createdAt: new Date().toISOString(),
-        };
-        const storedPreviews = JSON.parse(sessionStorage.getItem('previews') || '[]');
-        storedPreviews.push(previewData);
-        // Keep only last 10 previews
-        const recentPreviews = storedPreviews.slice(-10);
-        sessionStorage.setItem('previews', JSON.stringify(recentPreviews));
-      } catch (err) {
-        console.error('Error storing preview:', err);
+      if (error) {
+        console.error('❌ Failed to save preview:', error);
+      } else {
+        console.log('✅ Preview saved:', savedPreview.id);
+        savedPreviewId = savedPreview.id;
       }
-
-      return {
-        previewId,
-        partialContent,
-        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // 24 hours
-        remainingPreviews,
-      };
     } catch (err) {
-      console.error('Error generating preview:', err);
-      throw new Error(err instanceof Error ? err.message : 'Failed to generate preview');
+      console.error('❌ Exception saving preview:', err);
     }
-  }
 
-  static async unlockPreview(previewId: string, accessToken: string): Promise<{ fullContent: string; tokensAwarded?: number; messageId?: string }> {
+    // Increment preview count
+    SessionManager.incrementPreviewCount();
+    const updatedSession = SessionManager.getOrCreateSession();
+    // Calculate remaining since Session interface doesn't have .remaining property
+    const remainingPreviews = Math.max(0, MAX_PREVIEWS - updatedSession.previewCount);
+
+    return {
+      partialContent,
+      fullMessage,
+      previewId: savedPreviewId,
+      remainingPreviews,
+    };
+  },
+
+  unlockPreview: async (previewId: string, accessToken: string): Promise<{ fullContent: string; tokensAwarded?: number; messageId?: string }> => {
     // Try to get from session storage first
     try {
       const storedPreviews = JSON.parse(sessionStorage.getItem('previews') || '[]');
@@ -162,5 +118,5 @@ export class PreviewService {
     }
 
     throw new Error('Preview not found and unlock service unavailable');
-  }
-}
+  },
+};

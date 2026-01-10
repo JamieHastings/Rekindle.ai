@@ -12,14 +12,11 @@ import AdminDashboard from './pages/admin/AdminDashboard';
 import { useAuth } from './contexts/AuthContext';
 import { supabase } from './lib/supabase';
 import { mapFormDataToBackend } from './utils/formMapper';
-import { N8nService } from './services/n8nService';
 import { SessionManager, MAX_PREVIEWS } from './utils/sessionManager';
 import { PreviewService } from './services/previewService';
 import PreviewMessageDisplay from './components/PreviewMessageDisplay';
 import UnlockPreviewModal from './components/UnlockPreviewModal';
-import { renderPromptFromForm } from './services/promptEngine';
-import { generateAIText } from './services/openaiService';
-import { deductTokens, addTokens, getTokenCost, hasEnoughTokens } from './services/tokenService';
+import { getTokenCost, addTokens } from './services/tokenService';
 
 type View = 'home' | 'generator' | 'dashboard' | 'admin';
 
@@ -71,12 +68,7 @@ function App() {
       
       // If profile is loaded, check admin status and redirect if not admin
       if (profile && !loading) {
-        const checkIsAdmin = (
-          profile.is_admin === true || 
-          profile.is_admin === 1 || 
-          profile.is_admin === 'true' ||
-          profile.is_admin === '1'
-        );
+        const checkIsAdmin = Boolean(profile.is_admin);
         
         if (!checkIsAdmin && currentView === 'admin') {
           console.log('User is not admin, redirecting to home');
@@ -116,14 +108,30 @@ function App() {
   // Role-based route protection: Redirect non-admin users away from admin routes only
   useEffect(() => {
     if (user && profile && !loading && currentView === 'admin') {
-      const isAdmin = profile && (profile.is_admin === true || profile.is_admin === 1 || profile.is_admin === 'true');
+      const isAdmin = Boolean(profile.is_admin);
       if (!isAdmin) {
         // Non-admin user trying to access admin route - redirect to home
         console.warn('Non-admin user attempted to access admin route, redirecting...');
         setCurrentView('home');
       }
     }
-  }, [user, profile, loading, currentView]);
+    
+    // Only redirect to home if user explicitly logged out
+    // Don't redirect on signup (when there's a generated message)
+    if (!user && !loading && (currentView === 'dashboard' || currentView === 'admin')) {
+      console.log('User logged out from protected view, resetting to home');
+      setCurrentView('home');
+      setShowAuthModal(false);
+    }
+    
+    // NEW: Don't reset view or message on signup
+    if (user && generatedMessage && currentView === 'generator') {
+      console.log('User signed up with generated message - keeping on generator view');
+      // Stay on generator view to show the message
+      setMessageTypeSelected(true);
+      setIsPreviewMode(false);
+    }
+  }, [user, profile, loading, currentView, generatedMessage]);
 
   // Debug logging
   useEffect(() => {
@@ -148,6 +156,17 @@ function App() {
       });
     }
   }, [user, profile, loading, currentView]);
+
+  // Add this new useEffect to handle post-signup state
+  useEffect(() => {
+    // When user signs up and has a message, keep it visible
+    if (user && profile && generatedMessage && currentView === 'generator') {
+      console.log('📝 User authenticated with message - ensuring visibility');
+      setMessageTypeSelected(true);
+      setIsPreviewMode(false);
+      setShowUnlockModal(false); // Close unlock modal if still open
+    }
+  }, [user, profile, generatedMessage, currentView]);
 
   const handleGenerate = async (formData: FormData) => {
     if (!user) {
@@ -239,94 +258,82 @@ function App() {
     setIsPreviewMode(false);
 
     try {
-      // Use the generate-message edge function instead of client-side code
-      console.log('📝 Generating message via edge function for type:', formData.messageType);
+      console.log('📝 Generating message for authenticated user');
+      console.log('  - Message type:', formData.messageType);
       console.log('  - User ID:', user.id);
+      console.log('  - Token cost:', tokenCost);
+      console.log('  - Current tokens:', profile.tokens);
+
+      // Get fresh session
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       
-      // Get access token for edge function
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) {
-        throw new Error('Not authenticated');
+      if (sessionError || !session) {
+        console.error('Session error:', sessionError);
+        throw new Error('Authentication session expired. Please sign in again.');
       }
 
-      // Map form data to edge function format
-      // Use the original messageType (poem, letter, apology, text, giftcard) not the backend mapped type
-      const messageTypeForEdge = formData.messageType; // Keep original type
-      
-      // Prepare prompt data for edge function - include all form fields
+      console.log('✅ Valid session obtained');
+
+      // Prepare prompt data
       const promptData: any = {
-        ...formData, // Include all form fields
         name: formData.loverName || formData.recipientName || formData.apologyLoverName || formData.voicenoteLoverName || formData.giftCardLoverName || '',
         tone: formData.tone || formData.poemTone || formData.apologyTone || formData.voicenoteTone || formData.giftCardTone || 'heartfelt',
-        relationshipLength: formData.relationshipLength || 'Not specified',
-        characterLength: formData.characterLength || formData.length || formData.apologyLength || formData.voicenoteLength || 'medium',
+        relationshipLength: formData.relationshipLength || '',
         additionalDetails: formData.additionalDetails || formData.whatHappened || formData.significantMessage || formData.voicenoteSignificantMessage || formData.giftCardWhatHappened || '',
       };
-      
+
       if (formData.occasion) {
         promptData.occasion = formData.occasion;
       }
 
-      // Call generate-message edge function
-      const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-      if (!SUPABASE_URL) {
-        throw new Error('VITE_SUPABASE_URL is not set');
+      if (formData.characterLength || formData.length || formData.apologyLength || formData.voicenoteLength) {
+        promptData.characterLength = formData.characterLength || formData.length || formData.apologyLength || formData.voicenoteLength || 'medium';
       }
 
-      console.log('🚀 Calling generate-message edge function:', {
-        messageType: messageTypeForEdge,
-        promptDataKeys: Object.keys(promptData),
-      });
+      console.log('🚀 Calling generate-message edge function...');
 
-      const response = await fetch(`${SUPABASE_URL}/functions/v1/generate-message`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
-          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY || '',
-        },
-        body: JSON.stringify({
-          messageType: messageTypeForEdge,
+      // Call edge function with proper headers
+      const { data: result, error: invokeError } = await supabase.functions.invoke('generate-message', {
+        body: {
+          messageType: formData.messageType,
           promptData: promptData,
           preview: false,
-        }),
+        },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
       });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-        const errorMessage = errorData.error || `HTTP ${response.status}`;
+      if (invokeError) {
+        console.error('❌ Edge function error:', invokeError);
         
-        if (response.status === 402) {
-          // Insufficient tokens
-          setError(errorMessage);
+        // Check if it's an insufficient tokens error
+        if (invokeError.message?.includes('Insufficient tokens') || invokeError.status === 402) {
+          setError(invokeError.message || 'Insufficient tokens');
           setShowTokenModal(true);
           return;
         }
         
-        throw new Error(errorMessage);
+        throw invokeError;
       }
 
-      const result = await response.json();
-      console.log('✅ Message generated via edge function:', {
+      if (!result) {
+        throw new Error('No data returned from edge function');
+      }
+
+      console.log('✅ Message generated successfully:', {
         messageId: result.messageId,
         tokens_remaining: result.tokens_remaining,
-        tokens_deducted: result.tokens_deducted || 0,
-        is_first_message: result.is_first_message || false,
-        preview_length: result.preview?.length,
-        full_length: result.full?.length,
+        tokens_deducted: result.tokens_deducted,
       });
 
       // Store message ID for regeneration
       if (result.messageId) {
         setLastGeneratedMessageId(result.messageId);
+        console.log('💾 Message ID stored:', result.messageId);
       }
 
-      // Show message if first message was free
-      if (result.is_first_message) {
-        console.log('🎁 First message is FREE - no tokens deducted!');
-      }
-
-      // Update UI with generated message
+      // Display the message
       if (result.full) {
         setGeneratedMessage(result.full);
       } else {
@@ -341,26 +348,20 @@ function App() {
         setShowGiftCardTemplate(true);
       }
     } catch (err) {
-      console.error('Error generating message:', err);
+      console.error('❌ Error generating message:', err);
       const errorMessage = err instanceof Error ? err.message : 'Failed to generate message';
       
-      // Provide more helpful error messages
       if (errorMessage.includes('Insufficient tokens')) {
         setError(errorMessage);
         setShowTokenModal(true);
-      } else if (errorMessage.includes('OpenAI API key') || errorMessage.includes('VITE_OPENAI_API_KEY')) {
-        setError('OpenAI API key is missing. Please add VITE_OPENAI_API_KEY to .env.local file and restart the dev server.');
-      } else if (errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
-        setError('Invalid OpenAI API key. Please check your .env.local file.');
-      } else if (errorMessage.includes('429') || errorMessage.includes('rate limit')) {
-        setError('OpenAI rate limit exceeded. Please try again later.');
-      } else if (errorMessage.includes('quota')) {
-        setError('OpenAI account has insufficient quota. Please check your billing.');
-      } else if (errorMessage.includes('Token deduction failed')) {
-        // Token was already deducted, but generation failed - this is handled
-        setError('Failed to generate message. Please try again.');
+      } else if (errorMessage.includes('session expired') || errorMessage.includes('Authentication')) {
+        setError('Your session expired. Please sign in again.');
+        await signOut();
+        setShowAuthModal(true);
+      } else if (errorMessage.includes('OpenAI')) {
+        setError('AI service error. Please try again.');
       } else {
-        setError(errorMessage);
+        setError(`Failed to generate message: ${errorMessage}`);
       }
     } finally {
       setIsGenerating(false);
@@ -447,15 +448,12 @@ function App() {
 
     try {
       // Get access token for edge function
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) {
-        throw new Error('Not authenticated');
-      }
-
-      // Call regenerate-message edge function
-      const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-      if (!SUPABASE_URL) {
-        throw new Error('VITE_SUPABASE_URL is not set');
+      // Get fresh session
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      if (sessionError || !session) {
+        console.error('Session error:', sessionError);
+        throw new Error('Authentication session expired. Please sign in again.');
       }
 
       console.log('🔄 Regenerating message via edge function:', {
@@ -463,33 +461,31 @@ function App() {
         tokenCost: REGENERATE_TOKEN_COST,
       });
 
-      const response = await fetch(`${SUPABASE_URL}/functions/v1/regenerate-message`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
-          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY || '',
-        },
-        body: JSON.stringify({
+      const { data: result, error: invokeError } = await supabase.functions.invoke('regenerate-message', {
+        body: {
           messageId: messageIdToRegenerate,
-        }),
+        },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
       });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-        const errorMessage = errorData.error || `HTTP ${response.status}`;
-
-        if (response.status === 402) {
-          // Insufficient tokens
-          setError(errorMessage);
+      if (invokeError) {
+        console.error('❌ Edge function error:', invokeError);
+        
+        // Check if it's an insufficient tokens error (402)
+        if (invokeError.message?.includes('Insufficient tokens') || invokeError.status === 402) {
+          setError(invokeError.message || 'Insufficient tokens');
           setShowTokenModal(true);
           return;
         }
-
-        throw new Error(errorMessage);
+        
+        throw invokeError;
       }
 
-      const result = await response.json();
+      if (!result) {
+        throw new Error('No data returned from edge function');
+      }
       console.log('✅ Message regenerated via edge function:', {
         tokens_remaining: result.tokens_remaining,
         newMessageLength: result.newMessage?.length,
@@ -505,9 +501,16 @@ function App() {
       // Refresh profile to get updated token count
       await refreshProfile();
     } catch (err) {
-      console.error('Error regenerating message:', err);
+      console.error('❌ Error regenerating message:', err);
       const errorMessage = err instanceof Error ? err.message : 'Failed to regenerate message';
-      setError(errorMessage);
+      
+      if (errorMessage.includes('session expired') || errorMessage.includes('Authentication')) {
+        setError('Your session expired. Please sign in again.');
+        await signOut();
+        setShowAuthModal(true);
+      } else {
+        setError(errorMessage);
+      }
     } finally {
       setIsGenerating(false);
     }
@@ -526,18 +529,36 @@ function App() {
   };
 
   const handleUnlockSuccess = (fullContent: string, tokensAwarded: number, messageId?: string) => {
+    console.log('🔓 Unlocking message:', {
+      contentLength: fullContent.length,
+      messageId,
+      tokensAwarded
+    });
+    
+    // Set the generated message
     setGeneratedMessage(fullContent);
     setIsPreviewMode(false);
     
-    // Store messageId for regeneration
+    // Store message ID for regeneration
     if (messageId) {
       setLastGeneratedMessageId(messageId);
-      console.log('✅ MessageId stored for regeneration:', messageId);
+      console.log('💾 Stored message ID:', messageId);
     }
     
+    // Refresh profile to get updated tokens
     if (tokensAwarded > 0) {
       refreshProfile();
     }
+    
+    // Make sure we stay on generator view to show the message
+    if (currentView !== 'generator') {
+      setCurrentView('generator');
+    }
+    
+    // Ensure message type is selected so the display shows
+    setMessageTypeSelected(true);
+    
+    console.log('✅ Message unlocked and displayed');
   };
 
   const handleViewChange = (view: View) => {
@@ -550,13 +571,8 @@ function App() {
     }
   };
 
-  // Helper function to check if user is admin - handles various data types
-  const isAdminUser = profile && (
-    profile.is_admin === true || 
-    profile.is_admin === 1 || 
-    profile.is_admin === 'true' ||
-    profile.is_admin === '1'
-  );
+  // Helper function to check if user is admin
+  const isAdminUser = profile ? Boolean(profile.is_admin) : false;
 
   // Role-based routing: Admin users see AdminDashboard
   // Only handle 'admin' view here - dashboard view is handled separately below
@@ -585,12 +601,7 @@ function App() {
     }
     
     // Profile is loaded, check if user is admin
-    const checkIsAdmin = profile && (
-      profile.is_admin === true || 
-      profile.is_admin === 1 || 
-      profile.is_admin === 'true' ||
-      profile.is_admin === '1'
-    );
+    const checkIsAdmin = Boolean(profile.is_admin);
     
     console.log('Admin routing check', {
       currentView,

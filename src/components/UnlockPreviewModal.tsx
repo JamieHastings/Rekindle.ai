@@ -31,12 +31,18 @@ export default function UnlockPreviewModal({
       return;
     }
 
-    setLoading(true);
-    setError('');
-
     try {
-      // Step 1: Create the user account
-      const { data: authData, error: signUpError } = await supabase.auth.signUp({
+      setLoading(true);
+      setError('');
+
+      // Get session ID before signup - USE getOrCreateSession()
+      const session = SessionManager.getOrCreateSession();
+      const sessionId = session.id;
+
+      console.log('📝 Signing up with session ID:', sessionId);
+
+      // Sign up the user
+      const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
@@ -46,69 +52,101 @@ export default function UnlockPreviewModal({
         },
       });
 
-      if (signUpError) throw signUpError;
+      if (error) throw error;
 
-      // Step 2: Check if user was created
-      if (!authData.user) {
-        setError('Failed to create account. Please try again.');
-        return;
-      }
+      if (data.user && data.session) {
+        console.log('✅ User signed up successfully:', data.user.id);
 
-      // Step 3: Ensure we have a session (auto sign-in if needed)
-      let accessToken: string | null = null;
+        // Wait for profile to be created (increased wait time)
+        await new Promise(resolve => setTimeout(resolve, 1500));
 
-      if (authData.session) {
-        // Session created immediately - use it
-        accessToken = authData.session.access_token;
-      } else {
-        // Session not available - automatically sign in to establish session
-        console.log('No session after signup, automatically signing in...');
-        
-        // Wait a moment for the user to be fully created
+        // Verify profile exists
+        const { data: profile, error: profileError } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', data.user.id)
+          .single();
+
+        if (profileError || !profile) {
+          console.error('❌ Profile not created');
+          throw new Error('Account created but setup incomplete. Please try logging in.');
+        }
+
+        console.log('✅ Profile confirmed:', profile);
+
+        // Convert preview messages
+        if (sessionId) {
+          console.log('🔄 Converting preview messages...');
+          
+          const { data: convertResult, error: convertError } = await supabase
+            .rpc('convert_preview_on_signup', {
+              p_user_id: data.user.id,
+              p_session_id: sessionId
+            });
+
+          if (convertError) {
+            console.error('⚠️ Conversion failed:', convertError);
+          } else {
+            console.log('✅ Converted:', convertResult);
+          }
+        }
+
+        // Wait a bit more for conversion to complete
         await new Promise(resolve => setTimeout(resolve, 500));
-        
-        // Automatically sign in with the credentials to establish a session
-        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
 
-        if (signInError) {
-          console.error('Auto sign-in after signup failed:', signInError);
-          setError('Account created, but failed to sign in. Please try signing in manually.');
-          return;
-        }
+        // Fetch the converted message
+        const { data: convertedMessage, error: fetchError } = await supabase
+          .from('generated_messages')
+          .select('*')
+          .eq('user_id', data.user.id)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
 
-        if (signInData?.session?.access_token) {
-          accessToken = signInData.session.access_token;
-          console.log('Successfully signed in after signup');
+        if (fetchError) {
+          console.error('⚠️ Failed to fetch converted message:', fetchError);
+          
+          // Fallback: Try to get from preview_messages
+          const { data: previewMessage } = await supabase
+            .from('preview_messages')
+            .select('*')
+            .eq('session_id', sessionId)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .single();
+          
+          if (previewMessage) {
+            // Try both column names (preview_text or full_content)
+            const messageContent = previewMessage.preview_text || previewMessage.full_content;
+            if (messageContent) {
+              console.log('✅ Using preview message as fallback');
+              onUnlockSuccess(messageContent, 3);
+            } else {
+              console.log('⚠️ Preview message found but no content');
+              onUnlockSuccess('Your message will appear in your dashboard shortly.', 3);
+            }
+          } else {
+            console.log('⚠️ No message found');
+            onUnlockSuccess('Your message will appear in your dashboard shortly.', 3);
+          }
         } else {
-          setError('Account created, but failed to establish session. Please try signing in manually.');
-          return;
+          console.log('✅ Message found and unlocking:', convertedMessage.id);
+          // Pass the full message text
+          onUnlockSuccess(convertedMessage.generated_content, 3, convertedMessage.id);
         }
+
+        // Close after a short delay to let state update
+        setTimeout(() => {
+          onClose();
+        }, 300);
+      } else {
+        // Email confirmation required
+        setError('Please check your email to confirm your account.');
       }
-
-      // Step 4: Wait a moment for profile to be created by database trigger
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      // Step 5: Unlock the preview with the access token
-      if (!accessToken) {
-        setError('Failed to establish session. Please try again.');
-        return;
-      }
-
-      const { fullContent, tokensAwarded, messageId } = await PreviewService.unlockPreview(
-        previewId,
-        accessToken
-      );
-
-      SessionManager.clearSession();
-
-      onUnlockSuccess(fullContent, tokensAwarded || 0, messageId || undefined);
-      onClose();
     } catch (err) {
       console.error('Signup error:', err);
-      setError(err instanceof Error ? err.message : 'Failed to sign up');
+      const errorMessage = err instanceof Error ? err.message : 'Signup failed';
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }

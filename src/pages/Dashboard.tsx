@@ -12,7 +12,7 @@ interface GeneratedMessage {
   generated_content: string;
   created_at: string;
   is_favorite: boolean;
-  was_preview: boolean;
+  is_preview?: boolean;
   occasion?: string;
 }
 
@@ -22,8 +22,28 @@ interface MessageStats {
   favoriteCount: number;
 }
 
+const getMessageTypeLabel = (type: string): string => {
+  const labels: { [key: string]: string } = {
+    'poem': 'Poem',
+    'letter': 'Love Letter',
+    'love_letter': 'Love Letter',
+    'apology': 'Apology',
+    'rekindling': 'Rekindling Message',
+    'text': 'Text Message',
+    'giftcard': 'Gift Card',
+    'voicenote': 'Voice Note',
+    'birthday': 'Birthday Message',
+    'support': 'Support Message',
+    'closure': 'Closure Message',
+  };
+  
+  return labels[type] || type; // Fallback to the type itself
+};
+
 export default function Dashboard() {
-  const { user, profile } = useAuth();
+  const auth = useAuth();
+  const user = auth?.user;
+  const profile = auth?.profile;
   const [messages, setMessages] = useState<GeneratedMessage[]>([]);
   const [filteredMessages, setFilteredMessages] = useState<GeneratedMessage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -57,6 +77,7 @@ export default function Dashboard() {
         .from('generated_messages')
         .select('*')
         .eq('user_id', user.id)
+        .eq('is_preview', false) // Only show full messages, not previews
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -340,7 +361,7 @@ export default function Dashboard() {
                     </h3>
                     <div className="flex gap-2">
                       <span className="text-xs px-2 py-1 bg-[#CC4F4E] bg-opacity-10 text-[#CC4F4E] rounded">
-                        {message.message_type}
+                        {getMessageTypeLabel(message.message_type)}
                       </span>
                       <span className="text-xs px-2 py-1 bg-blue-500 bg-opacity-10 text-blue-500 rounded">
                         {message.tone}
@@ -366,7 +387,7 @@ export default function Dashboard() {
 
                 <div className="flex items-center justify-between text-xs text-text-light">
                   <span>{formatDate(message.created_at)}</span>
-                  {message.was_preview && (
+                  {message.is_preview && (
                     <span className="px-2 py-1 bg-green-500 bg-opacity-10 text-green-500 rounded">
                       Unlocked
                     </span>
@@ -396,12 +417,12 @@ export default function Dashboard() {
                 </h2>
                 <div className="flex gap-2 mb-2">
                   <span className="text-sm px-3 py-1 bg-[#CC4F4E] bg-opacity-10 text-[#CC4F4E] rounded">
-                    {selectedMessage.message_type}
+                    {getMessageTypeLabel(selectedMessage.message_type)}
                   </span>
                   <span className="text-sm px-3 py-1 bg-blue-500 bg-opacity-10 text-blue-500 rounded">
                     {selectedMessage.tone}
                   </span>
-                  {selectedMessage.was_preview && (
+                  {selectedMessage.is_preview && (
                     <span className="text-sm px-3 py-1 bg-green-500 bg-opacity-10 text-green-500 rounded">
                       Unlocked from Preview
                     </span>
