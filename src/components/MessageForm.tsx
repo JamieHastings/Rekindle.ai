@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Dropdown from './Dropdown';
+import GiftCardTemplateSelector from './GiftCardTemplateSelector';
 
 interface MessageFormProps {
   onGenerate: (formData: FormData) => void;
@@ -378,6 +379,12 @@ export default function MessageForm({ onGenerate, isGenerating, onMessageTypeSel
                 onChange={(value) => handleDropdownChange('relationshipStatus', value)}
                 required
               />
+
+              <GiftCardTemplateSelector
+                onTemplateSelect={(template) => handleDropdownChange('giftCardTemplate', template)}
+                selectedTemplate={formData.giftCardTemplate || 'romantic-hearts'}
+              />
+
               <div>
                 <label htmlFor="giftCardLoverName" className="block text-base font-medium text-text-dark mb-2">
                   Lover's Name
@@ -537,6 +544,12 @@ export default function MessageForm({ onGenerate, isGenerating, onMessageTypeSel
                 onChange={(value) => handleDropdownChange('relationshipStatus', value)}
                 required
               />
+
+              <GiftCardTemplateSelector
+                onTemplateSelect={(template) => handleDropdownChange('giftCardTemplate', template)}
+                selectedTemplate={formData.giftCardTemplate || 'romantic-hearts'}
+              />
+
               <div>
                 <label htmlFor="recipientName" className="block text-base font-medium text-text-dark mb-2">
                   Recipient Name
