@@ -61,6 +61,11 @@ export default function Dashboard() {
   const [showTokenModal, setShowTokenModal] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [regenerationError, setRegenerationError] = useState('');
+  const [tokenModalDetails, setTokenModalDetails] = useState<{
+    tokensRequired?: number;
+    action?: string;
+    messageType?: string;
+  }>({});
 
   useEffect(() => {
     if (user) {
@@ -209,6 +214,10 @@ export default function Dashboard() {
     const REGENERATE_TOKEN_COST = 2;
 
     if (profile.tokens < REGENERATE_TOKEN_COST) {
+      setTokenModalDetails({
+        tokensRequired: REGENERATE_TOKEN_COST,
+        action: 'regenerate your message',
+      });
       setRegenerationError(`You need ${REGENERATE_TOKEN_COST} tokens to regenerate this message.`);
       setShowTokenModal(true);
       return;
@@ -235,6 +244,14 @@ export default function Dashboard() {
 
       if (invokeError) {
         if (invokeError.message?.includes('Insufficient tokens') || invokeError.status === 402) {
+          // Try to extract token details from error response
+          const errorData = (invokeError as any).error || {};
+          const tokensRequired = errorData.tokens_required || REGENERATE_TOKEN_COST;
+          
+          setTokenModalDetails({
+            tokensRequired: tokensRequired,
+            action: 'regenerate your message',
+          });
           setRegenerationError('Insufficient tokens. Please purchase more tokens to continue.');
           setShowTokenModal(true);
           return;
@@ -268,7 +285,7 @@ export default function Dashboard() {
     }
   };
 
-  const handleTokenPurchase = (tokens: number) => {
+  const handleTokenPurchase = (_tokens: number) => {
     setShowTokenModal(false);
     auth?.refreshProfile();
   };
@@ -614,9 +631,13 @@ export default function Dashboard() {
         onClose={() => {
           setShowTokenModal(false);
           setRegenerationError('');
+          setTokenModalDetails({}); // Clear details when closing
         }}
         onPurchase={handleTokenPurchase}
         currentTokens={profile?.tokens || 0}
+        tokensRequired={tokenModalDetails.tokensRequired}
+        action={tokenModalDetails.action}
+        messageType={tokenModalDetails.messageType}
       />
     </div>
   );

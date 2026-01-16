@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Copy, Check, RotateCcw, Loader2, Download, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import PDFPreviewModal from './PDFPreviewModal';
 
 interface MessageDisplayProps {
   message: string;
@@ -8,6 +9,12 @@ interface MessageDisplayProps {
   onRegenerate: () => void;
   hasTokens: boolean;
   error?: string;
+  templateUrl?: string;
+  templateGradient?: string;
+  borderColor?: string;
+  accentColor?: string;
+  recipientName?: string;
+  messageType?: string;
 }
 
 export default function MessageDisplay({
@@ -16,8 +23,15 @@ export default function MessageDisplay({
   onRegenerate,
   hasTokens,
   error,
+  templateUrl,
+  templateGradient,
+  borderColor,
+  accentColor,
+  recipientName,
+  messageType,
 }: MessageDisplayProps) {
   const [copied, setCopied] = useState(false);
+  const [showPDFPreview, setShowPDFPreview] = useState(false);
 
   const handleCopy = async () => {
     if (message) {
@@ -36,6 +50,7 @@ export default function MessageDisplay({
     a.click();
     URL.revokeObjectURL(url);
   };
+
 
   if (isGenerating) {
     return (
@@ -216,11 +231,11 @@ export default function MessageDisplay({
           <motion.button
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
-            onClick={handleDownload}
+            onClick={() => setShowPDFPreview(true)}
             className="px-4 py-3 bg-background border border-border text-text-light rounded-lg hover:bg-panel transition-all shadow-lg font-medium flex items-center justify-center gap-2"
           >
             <Download className="w-5 h-5" />
-            Download
+            Download PDF
           </motion.button>
         </motion.div>
 
@@ -247,6 +262,19 @@ export default function MessageDisplay({
             Regenerate
           </motion.button>
         </motion.div>
+
+        {/* PDF Preview Modal */}
+        <PDFPreviewModal
+          isOpen={showPDFPreview}
+          onClose={() => setShowPDFPreview(false)}
+          message={message}
+          templateUrl={templateUrl}
+          templateGradient={templateGradient}
+          borderColor={borderColor}
+          accentColor={accentColor}
+          recipientName={recipientName}
+          messageType={messageType}
+        />
       </motion.div>
     </AnimatePresence>
   );

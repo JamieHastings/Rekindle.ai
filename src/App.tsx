@@ -20,6 +20,25 @@ import { getTokenCost, addTokens } from './services/tokenService';
 
 type View = 'home' | 'generator' | 'dashboard' | 'admin';
 
+// Helper function to format message type names
+const getMessageTypeLabel = (type: string): string => {
+  const labels: { [key: string]: string } = {
+    'poem': 'Poem',
+    'letter': 'Love Letter',
+    'love_letter': 'Love Letter',
+    'apology': 'Apology',
+    'rekindling': 'Rekindling Message',
+    'text': 'Text Message',
+    'giftcard': 'Gift Card',
+    'voicenote': 'Voice Note',
+    'birthday': 'Birthday Message',
+    'support': 'Support Message',
+    'closure': 'Closure Message',
+  };
+  
+  return labels[type] || type;
+};
+
 function App() {
   const { user, profile, signOut, refreshProfile, loading } = useAuth();
   const [currentView, setCurrentView] = useState<View>('home');
@@ -38,6 +57,11 @@ function App() {
   const [showUnlockModal, setShowUnlockModal] = useState(false);
   const [remainingPreviews, setRemainingPreviews] = useState(3);
   const [lastGeneratedMessageId, setLastGeneratedMessageId] = useState<string | null>(null);
+  const [tokenModalDetails, setTokenModalDetails] = useState<{
+    tokensRequired?: number;
+    action?: string;
+    messageType?: string;
+  }>({});
 
   // Refresh profile when user logs in
   useEffect(() => {
@@ -246,6 +270,11 @@ function App() {
     // Check if user has enough tokens (minimum 5 for most message types, 15 for giftcard/love_letter)
     const tokenCost = getTokenCost(formData.messageType);
     if (!profile || profile.tokens < tokenCost) {
+      setTokenModalDetails({
+        tokensRequired: tokenCost,
+        action: 'generate this message',
+        messageType: getMessageTypeLabel(formData.messageType),
+      });
       setShowTokenModal(true);
       return;
     }
@@ -309,6 +338,15 @@ function App() {
         
         // Check if it's an insufficient tokens error
         if (invokeError.message?.includes('Insufficient tokens') || invokeError.status === 402) {
+          // Try to extract token details from error response
+          const errorData = (invokeError as any).error || {};
+          const tokensRequired = errorData.tokens_required || tokenCost;
+          
+          setTokenModalDetails({
+            tokensRequired: tokensRequired,
+            action: 'generate this message',
+            messageType: getMessageTypeLabel(formData.messageType),
+          });
           setError(invokeError.message || 'Insufficient tokens');
           setShowTokenModal(true);
           return;
@@ -352,6 +390,13 @@ function App() {
       const errorMessage = err instanceof Error ? err.message : 'Failed to generate message';
       
       if (errorMessage.includes('Insufficient tokens')) {
+        // Try to get token cost from current form data if available
+        const tokenCost = currentFormData ? getTokenCost(currentFormData.messageType) : 5;
+        setTokenModalDetails({
+          tokensRequired: tokenCost,
+          action: 'generate this message',
+          messageType: currentFormData ? getMessageTypeLabel(currentFormData.messageType) : undefined,
+        });
         setError(errorMessage);
         setShowTokenModal(true);
       } else if (errorMessage.includes('session expired') || errorMessage.includes('Authentication')) {
@@ -392,7 +437,7 @@ function App() {
 
   const handleRegenerate = async () => {
     if (!user || !profile) {
-      setShowTokenModal(true);
+      setError('Please sign in to regenerate messages.');
       return;
     }
 
@@ -408,26 +453,34 @@ function App() {
           // Try to get the most recent message from the database
           const { data: messages, error: fetchError } = await supabase
             .from('generated_messages')
-            .select('id')
+            .select('id, message_type, created_at')
+            .eq('is_preview', false) // Only get full messages, not previews
             .order('created_at', { ascending: false })
             .limit(1)
-            .single();
+            .maybeSingle(); // Use maybeSingle() instead of single() to handle no results gracefully
+          
+          console.log('🔍 Message lookup result:', { messages, fetchError });
           
           if (!fetchError && messages?.id) {
             messageIdToRegenerate = messages.id;
             setLastGeneratedMessageId(messages.id);
             console.log('✅ Found most recent message:', messageIdToRegenerate);
           } else {
+            console.error('❌ Failed to find message:', fetchError);
             setError('No message to regenerate. Please generate a message first.');
+            setIsGenerating(false);
             return;
           }
         } else {
+          console.error('❌ No session found');
           setError('No message to regenerate. Please generate a message first.');
+          setIsGenerating(false);
           return;
         }
       } catch (err) {
-        console.error('Error finding message:', err);
+        console.error('❌ Error finding message:', err);
         setError('No message to regenerate. Please generate a message first.');
+        setIsGenerating(false);
         return;
       }
     }
@@ -438,6 +491,10 @@ function App() {
 
     // Check if user has enough tokens for regeneration (2 tokens)
     if (currentTokens < REGENERATE_TOKEN_COST) {
+      setTokenModalDetails({
+        tokensRequired: REGENERATE_TOKEN_COST,
+        action: 'regenerate your message',
+      });
       setError(`Insufficient tokens. You need ${REGENERATE_TOKEN_COST} tokens to regenerate. You currently have ${currentTokens} tokens.`);
       setShowTokenModal(true);
       return;
@@ -459,6 +516,7 @@ function App() {
       console.log('🔄 Regenerating message via edge function:', {
         messageId: messageIdToRegenerate,
         tokenCost: REGENERATE_TOKEN_COST,
+        currentTokens: currentTokens,
       });
 
       const { data: result, error: invokeError } = await supabase.functions.invoke('regenerate-message', {
@@ -470,13 +528,36 @@ function App() {
         },
       });
 
+      console.log('📦 Regenerate response:', { result, invokeError });
+
       if (invokeError) {
         console.error('❌ Edge function error:', invokeError);
+        console.error('Error details:', {
+          message: invokeError.message,
+          status: invokeError.status,
+          error: invokeError,
+        });
         
         // Check if it's an insufficient tokens error (402)
         if (invokeError.message?.includes('Insufficient tokens') || invokeError.status === 402) {
+          // Try to extract token details from error response
+          const errorData = (invokeError as any).error || {};
+          const tokensRequired = errorData.tokens_required || REGENERATE_TOKEN_COST;
+          
+          setTokenModalDetails({
+            tokensRequired: tokensRequired,
+            action: 'regenerate your message',
+          });
           setError(invokeError.message || 'Insufficient tokens');
           setShowTokenModal(true);
+          return;
+        }
+
+        // Check for message not found error
+        if (invokeError.message?.includes('Message not found') || invokeError.message?.includes('access denied') || invokeError.status === 404) {
+          setError('Message not found. Please generate a new message.');
+          // Clear the stored message ID so it doesn't try to regenerate a non-existent message
+          setLastGeneratedMessageId(null);
           return;
         }
         
@@ -484,17 +565,28 @@ function App() {
       }
 
       if (!result) {
+        console.error('❌ No result returned from edge function');
         throw new Error('No data returned from edge function');
       }
+
+      // Check if result contains an error (even with 200 status)
+      if ((result as any)?.error) {
+        console.error('❌ Error in response body:', (result as any).error);
+        throw new Error((result as any).error || 'Failed to regenerate message');
+      }
+
       console.log('✅ Message regenerated via edge function:', {
-        tokens_remaining: result.tokens_remaining,
-        newMessageLength: result.newMessage?.length,
+        success: (result as any)?.success,
+        tokens_remaining: (result as any)?.tokens_remaining,
+        newMessageLength: (result as any)?.newMessage?.length,
       });
 
       // Update UI with regenerated message
-      if (result.newMessage) {
-        setGeneratedMessage(result.newMessage);
+      if ((result as any)?.newMessage) {
+        setGeneratedMessage((result as any).newMessage);
+        console.log('✅ Message updated in UI');
       } else {
+        console.error('❌ No newMessage in result:', result);
         throw new Error('No message content in response');
       }
 
@@ -504,7 +596,14 @@ function App() {
       console.error('❌ Error regenerating message:', err);
       const errorMessage = err instanceof Error ? err.message : 'Failed to regenerate message';
       
-      if (errorMessage.includes('session expired') || errorMessage.includes('Authentication')) {
+      if (errorMessage.includes('Insufficient tokens')) {
+        setTokenModalDetails({
+          tokensRequired: 2,
+          action: 'regenerate your message',
+        });
+        setError(errorMessage);
+        setShowTokenModal(true);
+      } else if (errorMessage.includes('session expired') || errorMessage.includes('Authentication')) {
         setError('Your session expired. Please sign in again.');
         await signOut();
         setShowAuthModal(true);
@@ -907,6 +1006,15 @@ function App() {
                       onRegenerate={handleRegenerate}
                       hasTokens={(profile?.tokens || 0) >= 2}
                       error={error}
+                      recipientName={
+                        currentFormData?.loverName ||
+                        currentFormData?.recipientName ||
+                        currentFormData?.apologyLoverName ||
+                        currentFormData?.giftCardLoverName ||
+                        currentFormData?.name ||
+                        undefined
+                      }
+                      messageType={currentFormData?.messageType}
                     />
                   )}
 
@@ -942,9 +1050,15 @@ function App() {
 
       <TokenPurchaseModal
         isOpen={showTokenModal}
-        onClose={() => setShowTokenModal(false)}
+        onClose={() => {
+          setShowTokenModal(false);
+          setTokenModalDetails({}); // Clear details when closing
+        }}
         onPurchase={handlePurchaseTokens}
         currentTokens={profile?.tokens || 0}
+        tokensRequired={tokenModalDetails.tokensRequired}
+        action={tokenModalDetails.action}
+        messageType={tokenModalDetails.messageType}
       />
 
       <GiftCardEmailModal

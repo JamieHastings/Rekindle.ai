@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X, Coins, Loader2 } from 'lucide-react';
+import { X, Coins, Loader2, AlertCircle } from 'lucide-react';
 import { N8nService } from '../services/n8nService';
 
 interface TokenPurchaseModalProps {
@@ -7,6 +7,9 @@ interface TokenPurchaseModalProps {
   onClose: () => void;
   onPurchase: (tokens: number) => void;
   currentTokens: number;
+  tokensRequired?: number;
+  action?: string;
+  messageType?: string;
 }
 
 export default function TokenPurchaseModal({
@@ -14,6 +17,9 @@ export default function TokenPurchaseModal({
   onClose,
   onPurchase,
   currentTokens,
+  tokensRequired,
+  action,
+  messageType,
 }: TokenPurchaseModalProps) {
   const [isProcessing, setIsProcessing] = useState(false);
 
@@ -24,6 +30,16 @@ export default function TokenPurchaseModal({
     { tokens: 15, price: 25, priceCents: 2500, label: 'Popular', packageId: 'popular', highlight: true },
     { tokens: 50, price: 75, priceCents: 7500, label: 'Best Value', packageId: 'best_value' },
   ];
+
+  // Calculate shortfall if tokens required are provided
+  const shortfall = tokensRequired && tokensRequired > currentTokens 
+    ? tokensRequired - currentTokens 
+    : 0;
+
+  // Find which package would be sufficient
+  const sufficientPackage = tokensRequired 
+    ? packages.find(pkg => pkg.tokens >= shortfall) || packages[packages.length - 1]
+    : null;
 
   const handlePurchaseClick = async (pkg: typeof packages[0]) => {
     if (!N8nService.isConfigured()) {
@@ -68,6 +84,29 @@ export default function TokenPurchaseModal({
           <Coins className="w-6 h-6 text-[#CC4F4E]" />
           <h3 className="text-2xl font-bold text-text-dark">Buy Tokens</h3>
         </div>
+
+        {/* Insufficient Tokens Alert */}
+        {tokensRequired && action && tokensRequired > currentTokens && (
+          <div className="mb-4 p-4 bg-orange-500/10 border border-orange-500/30 rounded-lg">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 text-orange-500 flex-shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <h4 className="font-semibold text-text-dark mb-1">Insufficient Tokens</h4>
+                <p className="text-sm text-text-light">
+                  {messageType 
+                    ? `You need ${tokensRequired} tokens to ${action} this ${messageType} message, but you only have ${currentTokens} token${currentTokens !== 1 ? 's' : ''}.`
+                    : `You need ${tokensRequired} tokens to ${action}, but you only have ${currentTokens} token${currentTokens !== 1 ? 's' : ''}.`
+                  }
+                </p>
+                {shortfall > 0 && sufficientPackage && (
+                  <p className="text-xs text-text-light mt-2 opacity-80">
+                    💡 You need {shortfall} more token{shortfall !== 1 ? 's' : ''}. The {sufficientPackage.label} package ({sufficientPackage.tokens} tokens) would work!
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         <p className="text-text-light mb-4">
           Use tokens to regenerate messages and unlock features

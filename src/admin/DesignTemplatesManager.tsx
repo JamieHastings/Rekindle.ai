@@ -1,6 +1,19 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { Upload, Trash2, Edit2, Check, X, Eye, EyeOff } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import { Upload, Trash2, Edit2, X, Eye, EyeOff } from 'lucide-react';
+
+interface TemplateData {
+  name: string;
+  description: string;
+  category: 'love_letter' | 'gift_card' | 'poem' | 'general';
+  display_order: number;
+  preview_gradient?: string;
+  border_color?: string;
+  accent_color?: string;
+  storage_path?: string;
+  thumbnail_url?: string | null;
+}
 
 interface DesignTemplate {
   id: string;
@@ -19,16 +32,17 @@ interface DesignTemplate {
 }
 
 export default function DesignTemplatesManager() {
+  const { user } = useAuth();
   const [templates, setTemplates] = useState<DesignTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showUploadForm, setShowUploadForm] = useState(false);
 
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<TemplateData>({
     name: '',
     description: '',
-    category: 'love_letter' as const,
+    category: 'love_letter',
     preview_gradient: 'bg-gradient-to-br from-pink-50 to-red-50',
     border_color: 'border-red-200',
     accent_color: 'text-red-600',
@@ -134,12 +148,18 @@ export default function DesignTemplatesManager() {
 
         if (error) throw error;
       } else {
+        if (!user) {
+          alert('You must be logged in to create templates.');
+          return;
+        }
+
         const { error } = await supabase
           .from('design_templates')
           .insert({
             ...formData,
             image_url: imageData.url,
             storage_path: imageData.path,
+            created_by: user.id,
           });
 
         if (error) throw error;
@@ -161,7 +181,7 @@ export default function DesignTemplatesManager() {
     setFormData({
       name: template.name,
       description: template.description || '',
-      category: template.category,
+      category: template.category as TemplateData['category'],
       preview_gradient: template.preview_gradient,
       border_color: template.border_color,
       accent_color: template.accent_color,

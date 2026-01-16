@@ -16,6 +16,8 @@
     "axios": "^1.13.2",
     "dayjs": "^1.11.19",
     "framer-motion": "^12.23.24",
+    "html2canvas": "^1.4.1",
+    "jspdf": "^4.0.0",
     "lucide-react": "^0.344.0",
     "nunjucks": "^3.2.4",
     "openai": "^6.10.0",
