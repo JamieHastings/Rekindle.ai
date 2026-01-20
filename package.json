@@ -12,6 +12,7 @@
     "verify-setup": "node scripts/verify-setup.js"
   },
   "dependencies": {
+    "@paypal/react-paypal-js": "^8.9.2",
     "@supabase/supabase-js": "^2.57.4",
     "axios": "^1.13.2",
     "dayjs": "^1.11.19",
