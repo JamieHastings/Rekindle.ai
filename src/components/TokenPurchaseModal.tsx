@@ -1,8 +1,16 @@
-import { useState } from 'react';
-import { X, Coins } from 'lucide-react';
-import { PayPalScriptProvider, PayPalButtons } from '@paypal/react-paypal-js';
+import { useState, useEffect } from 'react';
+import { X, Coins, AlertCircle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { PaymentModal } from './PaymentModal';
+
+interface TokenPackage {
+  id: string;
+  name: string;
+  tokens: number;
+  price: number;
+  is_popular: boolean;
+}
 
 interface TokenPurchaseModalProps {
   isOpen: boolean;
@@ -10,185 +18,345 @@ interface TokenPurchaseModalProps {
   currentTokens: number;
 }
 
-const tokenPackages = [
-  { tokens: 10, price: 5.00, popular: false },
-  { tokens: 25, price: 10.00, popular: true },
-  { tokens: 50, price: 18.00, popular: false },
-  { tokens: 100, price: 30.00, popular: false },
-];
-
 export default function TokenPurchaseModal({
   isOpen,
   onClose,
   currentTokens,
 }: TokenPurchaseModalProps) {
   const { refreshProfile } = useAuth();
-  const [selectedPackage, setSelectedPackage] = useState(25);
-  const [showPayPal, setShowPayPal] = useState(false);
-  const [processing, setProcessing] = useState(false);
+  const [packages, setPackages] = useState<TokenPackage[]>([]);
+  const [selectedPackage, setSelectedPackage] = useState<TokenPackage | null>(null);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [successMessage, setSuccessMessage] = useState<{ tokensAdded: number; newBalance: number } | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  if (!isOpen) return null;
+  useEffect(() => {
+    if (isOpen) {
+      fetchPackages();
+    }
+  }, [isOpen]);
 
-  const selectedPrice = tokenPackages.find(p => p.tokens === selectedPackage)?.price || 0;
-
-  const createOrder = (data: any, actions: any) => {
-    console.log('💳 Creating PayPal order for', selectedPackage, 'tokens');
-
-    return actions.order.create({
-      purchase_units: [
-        {
-          description: `${selectedPackage} Rekindle.ai Tokens`,
-          amount: {
-            currency_code: 'USD',
-            value: selectedPrice.toFixed(2),
-          },
-        },
-      ],
-      application_context: {
-        shipping_preference: 'NO_SHIPPING',
-      },
-    });
-  };
-
-  const onApprove = async (data: any, actions: any) => {
-    setProcessing(true);
-
+  const fetchPackages = async () => {
     try {
-      console.log('✅ Payment approved, order ID:', data.orderID);
+      const { data, error } = await supabase
+        .from('token_packages')
+        .select('*')
+        .eq('is_active', true)
+        .order('price', { ascending: true });
 
-      const { data: result, error } = await supabase.functions.invoke('paypal-capture', {
-        body: {
-          orderId: data.orderID,
-          tokenAmount: selectedPackage,
-        },
-      });
-
-      if (error) throw error;
-
-      if (!result.success) {
-        throw new Error(result.error || 'Payment capture failed');
+      if (error) {
+        console.error('Error fetching packages:', error);
+        // Fallback to default packages if table doesn't exist
+        setPackages([
+          { id: '1', name: 'Starter', tokens: 10, price: 5.00, is_popular: false },
+          { id: '2', name: 'Popular', tokens: 25, price: 10.00, is_popular: true },
+          { id: '3', name: 'Value', tokens: 50, price: 18.00, is_popular: false },
+          { id: '4', name: 'Premium', tokens: 100, price: 30.00, is_popular: false },
+        ]);
+      } else {
+        setPackages(data || []);
       }
-
-      console.log('✅ Tokens added:', result.tokens_added);
-
-      await refreshProfile();
-
-      alert(`Success! ${result.tokens_added} tokens added to your account! 🎉`);
-      onClose();
-
-    } catch (error) {
-      console.error('❌ Error capturing payment:', error);
-      alert('Payment successful but failed to add tokens. Please contact support with order ID: ' + data.orderID);
+    } catch (err) {
+      console.error('Exception fetching packages:', err);
+      // Fallback to default packages
+      setPackages([
+        { id: '1', name: 'Starter', tokens: 10, price: 5.00, is_popular: false },
+        { id: '2', name: 'Popular', tokens: 25, price: 10.00, is_popular: true },
+        { id: '3', name: 'Value', tokens: 50, price: 18.00, is_popular: false },
+        { id: '4', name: 'Premium', tokens: 100, price: 30.00, is_popular: false },
+      ]);
     } finally {
-      setProcessing(false);
+      setLoading(false);
     }
   };
 
-  const onError = (err: any) => {
-    console.error('❌ PayPal error:', err);
-    alert('Payment failed. Please try again.');
-    setProcessing(false);
+  const handleSelectPackage = (pkg: TokenPackage) => {
+    setSelectedPackage(pkg);
+    setShowPaymentModal(true);
   };
 
+  const handlePaymentSuccess = async (orderId: string) => {
+    if (!selectedPackage) return;
+
+    setErrorMessage(null);
+    console.log('🎉 Processing payment success for order:', orderId);
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+
+      if (!user) {
+        setShowPaymentModal(false);
+        setErrorMessage('Please log in to purchase tokens.');
+        return;
+      }
+
+      console.log('👤 User authenticated:', user.id);
+
+      // Step 1: Save the payment to database
+      console.log('💾 Saving payment to database...');
+      const { data: paymentData, error: paymentError } = await supabase
+        .from('payments')
+        .insert({
+          user_id: user.id,
+          payment_id: orderId,
+          amount_cents: Math.round(selectedPackage.price * 100),
+          amount: Math.round(selectedPackage.price * 100),
+          currency: 'USD',
+          product: `${selectedPackage.name} - ${selectedPackage.tokens} tokens`,
+          tokens_purchased: selectedPackage.tokens,
+          package_name: selectedPackage.name,
+          status: 'completed',
+        })
+        .select()
+        .single();
+
+      if (paymentError) {
+        console.error('❌ Error saving payment:', paymentError);
+        throw paymentError;
+      }
+
+      console.log('✅ Payment saved:', paymentData);
+
+      // Step 2: Add tokens to user's account
+      console.log(`🪙 Adding ${selectedPackage.tokens} tokens to user account...`);
+
+      // Try using RPC function first
+      const { error: rpcError } = await supabase.rpc('add_tokens', {
+        user_id: user.id,
+        amount: selectedPackage.tokens,
+      });
+
+      if (rpcError) {
+        console.warn('⚠️ RPC function failed, using direct update:', rpcError);
+
+        // Fallback: Direct update to profiles table (fetch then update; Supabase client has no .raw())
+        const { data: profileBefore } = await supabase
+          .from('profiles')
+          .select('tokens')
+          .eq('id', user.id)
+          .single();
+
+        const currentTokens = profileBefore?.tokens ?? 0;
+        const newTokens = currentTokens + selectedPackage.tokens;
+
+        const { error: updateError } = await supabase
+          .from('profiles')
+          .update({ tokens: newTokens })
+          .eq('id', user.id);
+
+        if (updateError) {
+          console.error('❌ Error updating tokens:', updateError);
+          throw updateError;
+        }
+      }
+
+      console.log('✅ Tokens added successfully!');
+
+      // Step 3: Get updated token balance and refresh profile
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('tokens')
+        .eq('id', user.id)
+        .single();
+
+      const newBalance = profile?.tokens || 0;
+      console.log('💰 New token balance:', newBalance);
+
+      setShowPaymentModal(false);
+      setSuccessMessage({ tokensAdded: selectedPackage.tokens, newBalance });
+      await refreshProfile();
+    } catch (error: any) {
+      console.error('❌ Error processing payment:', error);
+      setShowPaymentModal(false);
+      const errorMsg = error?.message || 'Unknown error';
+      setErrorMessage(`Payment received but there was an error: ${errorMsg}. Order ID: ${orderId}. Please contact support if tokens were not added.`);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  const handleClose = () => {
+    setSuccessMessage(null);
+    setErrorMessage(null);
+    onClose();
+  };
+
+  if (loading) {
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full p-6">
+          <div className="text-center">
+            <p className="text-gray-600">Loading packages...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl font-bold text-gray-900">Purchase Tokens</h2>
-          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        <div className="mb-6 p-4 bg-blue-50 rounded-lg">
-          <p className="text-sm text-blue-800">
-            Current Balance: <span className="font-bold">{currentTokens} tokens</span>
-          </p>
-        </div>
-
-        {!showPayPal ? (
-          <>
-            <div className="grid grid-cols-2 gap-4 mb-6">
-              {tokenPackages.map((pkg) => (
-                <button
-                  key={pkg.tokens}
-                  onClick={() => setSelectedPackage(pkg.tokens)}
-                  className={`p-4 rounded-lg border-2 transition-all relative ${
-                    selectedPackage === pkg.tokens
-                      ? 'border-[#CC4F4E] bg-red-50'
-                      : 'border-gray-200 hover:border-gray-300'
-                  }`}
-                >
-                  {pkg.popular && (
-                    <span className="absolute -top-2 right-2 bg-[#CC4F4E] text-white text-xs px-2 py-1 rounded">
-                      Popular
-                    </span>
-                  )}
-                  <div className="flex items-center gap-2 mb-2">
-                    <Coins className="w-5 h-5 text-[#CC4F4E]" />
-                    <span className="text-2xl font-bold">{pkg.tokens}</span>
-                    <span className="text-gray-600">tokens</span>
-                  </div>
-                  <p className="text-xl font-bold text-gray-900">${pkg.price.toFixed(2)}</p>
-                  <p className="text-sm text-gray-500">
-                    ${(pkg.price / pkg.tokens).toFixed(2)} per token
-                  </p>
-                </button>
-              ))}
-            </div>
-
-            <button
-              onClick={() => setShowPayPal(true)}
-              className="w-full px-6 py-3 bg-[#0070ba] text-white rounded-lg hover:opacity-90 transition-all font-medium"
-            >
-              Continue to PayPal - ${selectedPrice.toFixed(2)}
-            </button>
-          </>
-        ) : (
-          <div>
-            <div className="mb-4 p-4 bg-gray-50 rounded-lg">
-              <p className="text-sm text-gray-700">
-                Purchasing: <span className="font-bold">{selectedPackage} tokens</span>
-              </p>
-              <p className="text-sm text-gray-700">
-                Total: <span className="font-bold">${selectedPrice.toFixed(2)} USD</span>
-              </p>
-            </div>
-
-            {processing && (
-              <div className="mb-4 p-4 bg-blue-50 rounded-lg text-center">
-                <p className="text-blue-800">Processing payment... Please wait.</p>
-              </div>
-            )}
-
-            <PayPalScriptProvider
-              options={{
-                clientId: import.meta.env.VITE_PAYPAL_CLIENT_ID,
-                currency: 'USD',
-              }}
-            >
-              <PayPalButtons
-                style={{ layout: 'vertical' }}
-                createOrder={createOrder}
-                onApprove={onApprove}
-                onError={onError}
-                disabled={processing}
-              />
-            </PayPalScriptProvider>
-
-            <button
-              onClick={() => setShowPayPal(false)}
-              className="w-full mt-4 px-6 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-all"
-            >
-              Back to Package Selection
+    <>
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full p-6 max-h-[90vh] overflow-y-auto">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-2xl font-bold text-gray-900">Purchase Tokens</h2>
+            <button onClick={handleClose} className="p-2 hover:bg-gray-100 rounded-full">
+              <X className="w-5 h-5" />
             </button>
           </div>
-        )}
 
-        <p className="text-xs text-gray-500 text-center mt-4">
-          Secure payment powered by PayPal
-        </p>
+          {successMessage ? (
+            <div className="py-8 text-center">
+              <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-green-100 text-green-600 mb-4">
+                <Coins className="w-10 h-10" />
+              </div>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">Payment successful</h3>
+              <p className="text-gray-600 mb-6">
+                {successMessage.tokensAdded} tokens have been added to your account.
+              </p>
+              <p className="text-lg font-semibold text-gray-800 mb-6">
+                New balance: <span className="text-[#CC4F4E]">{successMessage.newBalance} tokens</span>
+              </p>
+              <button
+                onClick={handleClose}
+                className="px-6 py-3 bg-[#CC4F4E] text-white font-medium rounded-lg hover:opacity-90 transition-opacity"
+              >
+                Done
+              </button>
+            </div>
+          ) : errorMessage ? (
+            <div className="py-8 text-center">
+              <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-amber-100 text-amber-600 mb-4">
+                <AlertCircle className="w-10 h-10" />
+              </div>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">Something went wrong</h3>
+              <p className="text-gray-600 mb-6 max-w-md mx-auto">{errorMessage}</p>
+              <button
+                onClick={() => { setErrorMessage(null); }}
+                className="px-6 py-3 bg-gray-200 text-gray-800 font-medium rounded-lg hover:bg-gray-300 transition-colors"
+              >
+                Try again
+              </button>
+              <button
+                onClick={handleClose}
+                className="ml-3 px-6 py-3 border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          ) : (
+            <>
+          <div className="mb-6 p-4 bg-blue-50 rounded-lg">
+            <p className="text-sm text-blue-800">
+              Current Balance: <span className="font-bold">{currentTokens} tokens</span>
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            {packages.map((pkg) => (
+              <div
+                key={pkg.id}
+                style={{
+                  border: pkg.is_popular ? '2px solid #CC4F4E' : '1px solid #ddd',
+                  borderRadius: '8px',
+                  padding: '1.5rem',
+                  position: 'relative',
+                  cursor: 'pointer',
+                  transition: 'transform 0.2s',
+                  backgroundColor: 'white',
+                }}
+                onClick={() => handleSelectPackage(pkg)}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'translateY(-4px)';
+                  e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = 'none';
+                }}
+              >
+                {pkg.is_popular && (
+                  <div style={{
+                    position: 'absolute',
+                    top: '-10px',
+                    right: '10px',
+                    backgroundColor: '#CC4F4E',
+                    color: 'white',
+                    padding: '4px 12px',
+                    borderRadius: '12px',
+                    fontSize: '12px',
+                    fontWeight: 'bold',
+                  }}>
+                    POPULAR
+                  </div>
+                )}
+
+                <h3 style={{ marginBottom: '0.5rem', fontSize: '18px', color: '#1a1a1a' }}>
+                  {pkg.name}
+                </h3>
+                
+                <div className="flex items-center gap-2 mb-2">
+                  <Coins className="w-5 h-5 text-[#CC4F4E]" />
+                  <span style={{ fontSize: '32px', fontWeight: 'bold', color: '#1a1a1a' }}>
+                    {pkg.tokens}
+                  </span>
+                  <span style={{ fontSize: '16px', fontWeight: 'normal', color: '#666' }}>
+                    tokens
+                  </span>
+                </div>
+
+                <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#CC4F4E' }}>
+                  ${pkg.price.toFixed(2)}
+                </div>
+
+                <button
+                  style={{
+                    width: '100%',
+                    marginTop: '1rem',
+                    padding: '0.75rem',
+                    backgroundColor: pkg.is_popular ? '#CC4F4E' : '#4CAF50',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    fontWeight: 'bold',
+                    transition: 'opacity 0.2s',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.opacity = '0.9';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.opacity = '1';
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleSelectPackage(pkg);
+                  }}
+                >
+                  Buy Now
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <p className="text-xs text-gray-500 text-center mt-4">
+            Secure payment powered by PayPal
+          </p>
+            </>
+          )}
+        </div>
       </div>
-    </div>
+
+      {selectedPackage && (
+        <PaymentModal
+          isOpen={showPaymentModal}
+          onClose={() => setShowPaymentModal(false)}
+          amount={selectedPackage.price.toString()}
+          description={`${selectedPackage.name} - ${selectedPackage.tokens} tokens`}
+          itemType="tokens"
+          onPaymentSuccess={handlePaymentSuccess}
+        />
+      )}
+    </>
   );
 }

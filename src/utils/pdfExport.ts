@@ -1,6 +1,77 @@
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 
+const isCrossOrigin = (url: string): boolean => {
+  try {
+    return new URL(url, window.location.href).origin !== window.location.origin;
+  } catch {
+    return false;
+  }
+};
+
+/** Approach B1: Replace cross-origin img srcs with blob URLs, capture, then restore. */
+async function exportMessageToPDFWithBlobProxy(
+  element: HTMLElement,
+  fileName: string
+): Promise<void> {
+  const images = element.getElementsByTagName('img');
+  const replacements: { img: HTMLImageElement; originalSrc: string; objectUrl: string }[] = [];
+
+  for (let i = 0; i < images.length; i++) {
+    const img = images[i];
+    const src = img.getAttribute('src') || img.src;
+    if (!src || !isCrossOrigin(src)) continue;
+    try {
+      const res = await fetch(src, { mode: 'cors' });
+      if (!res.ok) continue;
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      replacements.push({ img, originalSrc: src, objectUrl });
+      img.src = objectUrl;
+    } catch (e) {
+      console.warn('Failed to proxy image for PDF:', src, e);
+    }
+  }
+
+  await waitForImagesToLoad(element);
+  await new Promise((r) => setTimeout(r, 500));
+
+  const canvas = await html2canvas(element, {
+    scale: 2,
+    useCORS: true,
+    allowTaint: false,
+    backgroundColor: null,
+    logging: true,
+    imageTimeout: 15000,
+    removeContainer: false,
+    foreignObjectRendering: false,
+  });
+
+  for (const { img, originalSrc, objectUrl } of replacements) {
+    img.src = originalSrc;
+    URL.revokeObjectURL(objectUrl);
+  }
+
+  const canvasWidth = canvas.width;
+  const canvasHeight = canvas.height;
+  const pdfWidth = 210;
+  const pdfHeight = 297;
+  const ratio = Math.min(
+    pdfWidth / (canvasWidth / 2),
+    pdfHeight / (canvasHeight / 2)
+  );
+  const imgWidth = (canvasWidth / 2) * ratio;
+  const imgHeight = (canvasHeight / 2) * ratio;
+
+  const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const imgData = canvas.toDataURL('image/png', 1.0);
+  const xOffset = (pdfWidth - imgWidth) / 2;
+  const yOffset = (pdfHeight - imgHeight) / 2;
+  pdf.addImage(imgData, 'PNG', Math.max(0, xOffset), Math.max(0, yOffset), imgWidth, imgHeight, undefined, 'FAST');
+  pdf.save(fileName);
+  console.log('✅ PDF downloaded (blob proxy):', fileName);
+}
+
 // Helper function to wait for all images to load
 const waitForImagesToLoad = (element: HTMLElement): Promise<void> => {
   return new Promise((resolve) => {
@@ -45,71 +116,49 @@ export const exportMessageToPDF = async (
   try {
     console.log('🎨 Starting PDF generation...');
 
-    // Wait for all images to load
+    // Option A: allowTaint true so html2canvas draws the cross-origin background image
     console.log('⏳ Waiting for images to load...');
     await waitForImagesToLoad(element);
-    
-    // Give a small additional delay to ensure rendering is complete
-    await new Promise(resolve => setTimeout(resolve, 500));
+    await new Promise((resolve) => setTimeout(resolve, 1000));
 
-    console.log('📸 Capturing element to canvas...');
-
-    // Convert HTML element to canvas
     const canvas = await html2canvas(element, {
       scale: 2,
       useCORS: true,
       allowTaint: true,
-      backgroundColor: '#ffffff',
+      backgroundColor: null,
       logging: true,
-      imageTimeout: 15000, // Wait up to 15 seconds for images
+      imageTimeout: 15000,
       removeContainer: false,
+      foreignObjectRendering: false,
     });
 
-    console.log('✅ Canvas created:', {
-      width: canvas.width,
-      height: canvas.height,
-    });
-
-    // Get canvas dimensions
     const canvasWidth = canvas.width;
     const canvasHeight = canvas.height;
-
-    // A4 dimensions in mm
     const pdfWidth = 210;
     const pdfHeight = 297;
-
-    // Calculate scaling to fit A4
     const ratio = Math.min(
       pdfWidth / (canvasWidth / 2),
       pdfHeight / (canvasHeight / 2)
     );
-
     const imgWidth = (canvasWidth / 2) * ratio;
     const imgHeight = (canvasHeight / 2) * ratio;
 
-    console.log('📐 PDF dimensions:', {
-      imgWidth: imgWidth.toFixed(2),
-      imgHeight: imgHeight.toFixed(2),
-      ratio: ratio.toFixed(4),
-    });
+    let imgData: string;
+    try {
+      imgData = canvas.toDataURL('image/png', 1.0);
+    } catch (taintError) {
+      console.warn('⚠️ Canvas tainted, retrying with blob proxy...', taintError);
+      await exportMessageToPDFWithBlobProxy(element, fileName);
+      return;
+    }
 
-    // Create PDF
     const pdf = new jsPDF({
       orientation: 'portrait',
       unit: 'mm',
       format: 'a4',
     });
-
-    // Convert canvas to image (use PNG for better quality)
-    const imgData = canvas.toDataURL('image/png', 1.0);
-
-    console.log('🖼️ Image data created (length:', imgData.length, 'bytes)');
-
-    // Center the image on the page
     const xOffset = (pdfWidth - imgWidth) / 2;
     const yOffset = (pdfHeight - imgHeight) / 2;
-
-    // Add image to PDF
     pdf.addImage(
       imgData,
       'PNG',
@@ -118,14 +167,9 @@ export const exportMessageToPDF = async (
       imgWidth,
       imgHeight,
       undefined,
-      'FAST' // Compression mode
+      'FAST'
     );
-
-    console.log('✅ PDF created successfully');
-
-    // Save PDF
     pdf.save(fileName);
-
     console.log('✅ PDF downloaded:', fileName);
   } catch (error) {
     console.error('❌ Error generating PDF:', error);

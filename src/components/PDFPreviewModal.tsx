@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react';
-import { X, Download } from 'lucide-react';
+import { useRef, useState, useEffect } from 'react';
+import { X, Download, Loader2 } from 'lucide-react';
 import MessageWithTemplate from './MessageWithTemplate';
 import { exportMessageToPDF } from '../utils/pdfExport';
 
@@ -28,6 +28,25 @@ export default function PDFPreviewModal({
 }: PDFPreviewModalProps) {
   const exportRef = useRef<HTMLDivElement>(null);
   const [isExporting, setIsExporting] = useState(false);
+  const [backgroundLoaded, setBackgroundLoaded] = useState(false);
+
+  // Preload background when modal opens so PDF export has the image ready
+  useEffect(() => {
+    if (!isOpen) return;
+    if (templateUrl) {
+      setBackgroundLoaded(false);
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        console.log('✅ PDF modal: background loaded:', templateUrl);
+        setBackgroundLoaded(true);
+      };
+      img.onerror = () => setBackgroundLoaded(false);
+      img.src = templateUrl;
+    } else {
+      setBackgroundLoaded(true);
+    }
+  }, [isOpen, templateUrl]);
 
   if (!isOpen) return null;
 
@@ -50,9 +69,9 @@ export default function PDFPreviewModal({
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-auto">
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-gray-200 sticky top-0 bg-white">
+      <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] flex flex-col">
+        {/* Header - always visible */}
+        <div className="flex items-center justify-between p-4 border-b border-gray-200 shrink-0 bg-white">
           <h2 className="text-xl font-bold text-gray-900">Preview PDF</h2>
           <button
             onClick={onClose}
@@ -62,8 +81,8 @@ export default function PDFPreviewModal({
           </button>
         </div>
 
-        {/* Preview */}
-        <div className="p-6 flex justify-center bg-gray-100">
+        {/* Preview - scrollable middle section */}
+        <div className="p-6 flex justify-center bg-gray-100 overflow-auto min-h-0 flex-1">
           <div className="shadow-2xl">
             <MessageWithTemplate
               ref={exportRef}
@@ -78,15 +97,29 @@ export default function PDFPreviewModal({
           </div>
         </div>
 
-        {/* Footer */}
-        <div className="flex gap-3 p-4 border-t border-gray-200 sticky bottom-0 bg-white">
+        {/* Footer - always visible */}
+        <div className="flex gap-3 p-4 border-t border-gray-200 shrink-0 bg-white">
           <button
             onClick={handleDownload}
-            disabled={isExporting}
+            disabled={isExporting || (!!templateUrl && !backgroundLoaded)}
             className="flex-1 px-6 py-3 bg-[#CC4F4E] text-white rounded-lg hover:opacity-90 transition-all disabled:opacity-50 flex items-center justify-center gap-2 font-medium"
           >
-            <Download className="w-5 h-5" />
-            {isExporting ? 'Generating PDF...' : 'Download PDF'}
+            {(templateUrl && !backgroundLoaded) ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin" />
+                Loading template...
+              </>
+            ) : isExporting ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin" />
+                Generating PDF...
+              </>
+            ) : (
+              <>
+                <Download className="w-5 h-5" />
+                Download PDF
+              </>
+            )}
           </button>
           <button
             onClick={onClose}

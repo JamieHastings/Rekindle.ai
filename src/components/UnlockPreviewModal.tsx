@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Lock, Sparkles } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
 import { PreviewService } from '../services/previewService';
 import { SessionManager } from '../utils/sessionManager';
 
@@ -10,6 +11,10 @@ interface UnlockPreviewModalProps {
   onClose: () => void;
   onUnlockSuccess: (fullContent: string, tokensAwarded: number, messageId?: string) => void;
   previewId: string;
+  /** Id of the generated_messages row for this preview so unlock can update it with full content instead of inserting a duplicate. */
+  generatedMessageId?: string;
+  /** Full message content to save when converting preview (e.g. from parent state) */
+  fullMessage?: string;
 }
 
 export default function UnlockPreviewModal({
@@ -17,6 +22,7 @@ export default function UnlockPreviewModal({
   onClose,
   onUnlockSuccess,
   previewId,
+  fullMessage: fullMessageProp,
 }: UnlockPreviewModalProps) {
   const [mode, setMode] = useState<'signup' | 'signin'>('signup');
   const [email, setEmail] = useState('');
@@ -24,6 +30,7 @@ export default function UnlockPreviewModal({
   const [fullName, setFullName] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const { linkAnonymousMessages } = useAuth();
 
   const handleSignUp = async () => {
     if (!email || !password || !fullName) {
@@ -35,118 +42,46 @@ export default function UnlockPreviewModal({
       setLoading(true);
       setError('');
 
-      // Get session ID before signup - USE getOrCreateSession()
-      const session = SessionManager.getOrCreateSession();
-      const sessionId = session.id;
+      const anonymousSessionId = typeof localStorage !== 'undefined' ? localStorage.getItem('anonymous_session_id') : null;
 
-      console.log('📝 Signing up with session ID:', sessionId);
-
-      // Sign up the user
-      const { data, error } = await supabase.auth.signUp({
+      const { data, error: signUpError } = await supabase.auth.signUp({
         email,
         password,
         options: {
-          data: {
-            full_name: fullName,
-          },
+          data: { full_name: fullName },
         },
       });
 
-      if (error) throw error;
+      if (signUpError) throw signUpError;
+      if (!data.user) throw new Error('No user returned');
 
-      if (data.user && data.session) {
-        console.log('✅ User signed up successfully:', data.user.id);
+      console.log('✅ Account created:', data.user.id);
 
-        // Wait for profile to be created (increased wait time)
-        await new Promise(resolve => setTimeout(resolve, 1500));
-
-        // Verify profile exists
-        const { data: profile, error: profileError } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', data.user.id)
-          .single();
-
-        if (profileError || !profile) {
-          console.error('❌ Profile not created');
-          throw new Error('Account created but setup incomplete. Please try logging in.');
-        }
-
-        console.log('✅ Profile confirmed:', profile);
-
-        // Convert preview messages
-        if (sessionId) {
-          console.log('🔄 Converting preview messages...');
-          
-          const { data: convertResult, error: convertError } = await supabase
-            .rpc('convert_preview_on_signup', {
-              p_user_id: data.user.id,
-              p_session_id: sessionId
-            });
-
-          if (convertError) {
-            console.error('⚠️ Conversion failed:', convertError);
-          } else {
-            console.log('✅ Converted:', convertResult);
-          }
-        }
-
-        // Wait a bit more for conversion to complete
-        await new Promise(resolve => setTimeout(resolve, 500));
-
-        // Fetch the converted message
-        const { data: convertedMessage, error: fetchError } = await supabase
+      // Link anonymous messages: must match App.tsx storage (user_id null, anonymous_session_id in input_data)
+      if (anonymousSessionId) {
+        const { data: linked, error: linkError } = await supabase
           .from('generated_messages')
-          .select('*')
-          .eq('user_id', data.user.id)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .single();
+          .update({
+            user_id: data.user.id,
+            is_preview: false,
+          })
+          .is('user_id', null)
+          .contains('input_data', { anonymous_session_id: anonymousSessionId })
+          .select();
 
-        if (fetchError) {
-          console.error('⚠️ Failed to fetch converted message:', fetchError);
-          
-          // Fallback: Try to get from preview_messages
-          const { data: previewMessage } = await supabase
-            .from('preview_messages')
-            .select('*')
-            .eq('session_id', sessionId)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .single();
-          
-          if (previewMessage) {
-            // Try both column names (preview_text or full_content)
-            const messageContent = previewMessage.preview_text || previewMessage.full_content;
-            if (messageContent) {
-              console.log('✅ Using preview message as fallback');
-              onUnlockSuccess(messageContent, 3);
-            } else {
-              console.log('⚠️ Preview message found but no content');
-              onUnlockSuccess('Your message will appear in your dashboard shortly.', 3);
-            }
-          } else {
-            console.log('⚠️ No message found');
-            onUnlockSuccess('Your message will appear in your dashboard shortly.', 3);
+        if (!linkError) {
+          console.log(`✅ Linked ${linked?.length || 0} messages`);
+          if (typeof localStorage !== 'undefined') {
+            localStorage.removeItem('anonymous_session_id');
           }
-        } else {
-          console.log('✅ Message found and unlocking:', convertedMessage.id);
-          // Pass the full message text
-          onUnlockSuccess(convertedMessage.generated_content, 3, convertedMessage.id);
         }
-
-        // Close after a short delay to let state update
-        setTimeout(() => {
-          onClose();
-        }, 300);
-      } else {
-        // Email confirmation required
-        setError('Please check your email to confirm your account.');
       }
+
+      onUnlockSuccess(fullMessageProp || 'Your message will appear in your dashboard shortly.', 3, previewId);
+      onClose();
     } catch (err) {
-      console.error('Signup error:', err);
-      const errorMessage = err instanceof Error ? err.message : 'Signup failed';
-      setError(errorMessage);
+      console.error('❌ Error:', err);
+      setError(err instanceof Error ? err.message : 'Signup failed');
     } finally {
       setLoading(false);
     }
@@ -174,9 +109,15 @@ export default function UnlockPreviewModal({
         return;
       }
 
+      // Link any anonymous messages and charge existing user for them
+      if (authData.user) {
+        await linkAnonymousMessages(authData.user.id, { chargeForLinkedMessages: true });
+      }
+
       const { fullContent, tokensAwarded, messageId } = await PreviewService.unlockPreview(
         previewId,
-        authData.session.access_token
+        authData.session.access_token,
+        { generatedMessageId }
       );
 
       SessionManager.clearSession();

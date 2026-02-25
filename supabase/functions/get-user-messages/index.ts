@@ -69,7 +69,7 @@ Deno.serve(async (req: Request) => {
     // Build query using admin client
     let query = supabaseAdmin
       .from("generated_messages")
-      .select("id, message_type, tone, recipient_name, created_at, generated_content, is_favorite")
+      .select("id, message_type, tone, input_data, created_at, generated_content, is_favorite")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .range(offset, offset + limit - 1);
@@ -92,17 +92,20 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // Format messages with preview (first 2-3 lines)
-    const formattedMessages = (messages || []).map((msg) => ({
-      id: msg.id,
-      type: msg.message_type,
-      tone: msg.tone,
-      recipient_name: msg.recipient_name,
-      created_at: msg.created_at,
-      preview: msg.generated_content ? msg.generated_content.substring(0, 200).trim() + "..." : "",
-      full_content: msg.generated_content, // Include full content for dashboard
-      is_favorite: msg.is_favorite,
-    }));
+    const formattedMessages = (messages || []).map((msg: any) => {
+      const input = msg.input_data || {};
+      const recipientName = input.recipientName ?? input.name ?? input.loverName ?? msg.recipient_name ?? "Unknown";
+      return {
+        id: msg.id,
+        type: msg.message_type,
+        tone: msg.tone,
+        recipient_name: recipientName,
+        created_at: msg.created_at,
+        preview: msg.generated_content ? msg.generated_content.substring(0, 200).trim() + "..." : "",
+        full_content: msg.generated_content,
+        is_favorite: msg.is_favorite,
+      };
+    });
 
     return new Response(
       JSON.stringify({

@@ -10,18 +10,15 @@ if (!SUPABASE_URL) {
 }
 
 // Token costs for different message types
-// Updated to match edge function costs: 5 tokens for most, 15 for Love Letter/Gift Card
+// Premium (with templates): Love Letter 5, Gift Card 5
+// Standard: Poem 3, Apology 3, Voicenote 3; Regenerate 2 (in regenerate flow)
 export const TOKEN_COSTS = {
-  poem: 5,
+  poem: 3,
   letter: 5,
-  apology: 5,
-  text: 5,
-  giftcard: 15,
-  love_letter: 15,
-  rekindling: 5, // Maps to poem
-  birthday: 5, // Maps to letter
-  support: 5, // Maps to text
-  closure: 5,
+  apology: 3,
+  text: 3,
+  giftcard: 5,
+  love_letter: 5,
 } as const;
 
 export type MessageType = keyof typeof TOKEN_COSTS;

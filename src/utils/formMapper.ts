@@ -4,7 +4,7 @@ interface BackendFormData {
   name: string;
   relationshipLength: string;
   tone: string;
-  messageType: 'apology' | 'rekindling' | 'birthday' | 'support' | 'closure';
+  messageType: 'poem' | 'letter' | 'apology' | 'text' | 'giftcard';
   occasion?: string;
   additionalDetails: string;
   characterLength: 'short' | 'medium' | 'long';
@@ -12,15 +12,6 @@ interface BackendFormData {
 
 export function mapFormDataToBackend(formData: FormData): BackendFormData {
   const { messageType } = formData;
-
-  // Map old message types to new backend types
-  const messageTypeMap: Record<string, 'apology' | 'rekindling' | 'birthday' | 'support' | 'closure'> = {
-    poem: 'rekindling',
-    letter: 'birthday',
-    apology: 'apology',
-    text: 'support',
-    giftcard: 'rekindling',
-  };
 
   // Map length values
   const lengthMap: Record<string, 'short' | 'medium' | 'long'> = {
@@ -39,7 +30,7 @@ export function mapFormDataToBackend(formData: FormData): BackendFormData {
         name: formData.loverName || '',
         relationshipLength: 'Not specified',
         tone: formData.poemTone || 'romantic',
-        messageType: messageTypeMap[messageType],
+        messageType: 'poem',
         occasion: formData.shortDescription || undefined,
         additionalDetails: `Writing a poem for ${formData.loverName}. What happened: ${formData.whatHappened || ''}. ${formData.shortDescription ? `Additional context: ${formData.shortDescription}` : ''}`,
         characterLength: 'medium',
@@ -51,7 +42,7 @@ export function mapFormDataToBackend(formData: FormData): BackendFormData {
         name: formData.apologyLoverName || '',
         relationshipLength: 'Not specified',
         tone: formData.apologyTone || 'apologetic',
-        messageType: messageTypeMap[messageType],
+        messageType: 'apology',
         occasion: undefined,
         additionalDetails: `Significant message from lover: "${formData.significantMessage}". Context: ${formData.apologyDescription || ''}`,
         characterLength: lengthMap[formData.apologyLength || 'medium'],
@@ -63,7 +54,7 @@ export function mapFormDataToBackend(formData: FormData): BackendFormData {
         name: formData.giftCardLoverName || '',
         relationshipLength: 'Not specified',
         tone: formData.giftCardTone || 'warm',
-        messageType: messageTypeMap[messageType],
+        messageType: 'giftcard',
         occasion: 'Gift card message',
         additionalDetails: `Writing a gift card message. What happened: ${formData.giftCardWhatHappened || ''}. ${formData.giftCardDescription ? `Additional context: ${formData.giftCardDescription}` : ''}`,
         characterLength: 'medium',
@@ -75,7 +66,7 @@ export function mapFormDataToBackend(formData: FormData): BackendFormData {
         name: formData.voicenoteLoverName || '',
         relationshipLength: 'Not specified',
         tone: formData.voicenoteTone || 'conversational',
-        messageType: messageTypeMap[messageType],
+        messageType: 'text',
         occasion: 'Voicenote script',
         additionalDetails: `Creating a voicenote script. Significant message from lover: "${formData.voicenoteSignificantMessage}". Context: ${formData.voicenoteDescription || ''}`,
         characterLength: lengthMap[formData.voicenoteLength || 'medium'],
@@ -87,7 +78,7 @@ export function mapFormDataToBackend(formData: FormData): BackendFormData {
         name: formData.recipientName || '',
         relationshipLength: 'Not specified',
         tone: formData.tone || 'warm',
-        messageType: messageTypeMap[messageType],
+        messageType: 'letter',
         occasion: undefined,
         additionalDetails: `${formData.keyPoints ? `Key points: ${formData.keyPoints}. ` : ''}${formData.additionalDetails || ''}`,
         characterLength: lengthMap[formData.length || 'medium'],

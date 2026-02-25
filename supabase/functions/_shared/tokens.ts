@@ -11,14 +11,14 @@ export interface TokenCosts {
   "love_letter": number;
 }
 
-// Token costs per message type
+// Token costs: Premium (templates) Letter 5, Gift Card 5; Standard Poem 3, Apology 3, Voicenote 3
 export const TOKEN_COSTS: TokenCosts = {
-  poem: 5,
-  apology: 5,
-  text: 5,
+  poem: 3,
+  apology: 3,
+  text: 3,
   letter: 5,
-  giftcard: 15,
-  "love_letter": 15,
+  giftcard: 5,
+  "love_letter": 5,
 };
 
 export function getTokenCost(messageType: string): number {

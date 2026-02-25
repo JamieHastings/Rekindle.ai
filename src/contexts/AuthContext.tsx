@@ -11,6 +11,7 @@ import {
 import type { User, Session, AuthChangeEvent } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabaseClient";
 import type { Profile } from "../lib/supabase";
+import { getTokenCost } from "../services/tokenService";
 
 interface AuthContextType {
   user: User | null;
@@ -21,6 +22,8 @@ interface AuthContextType {
   signUp: (email: string, password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
+  /** Link anonymous messages to the given user; optional charge for existing users (sign-in). */
+  linkAnonymousMessages: (userId: string, options?: { chargeForLinkedMessages?: boolean }) => Promise<any[] | undefined>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -65,9 +68,33 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             .single();
 
           if (retryError) {
-            console.error('Profile still missing after retry. This is a trigger issue.');
-            // Don't show alert here - it would be too aggressive
-            // The signup flow will handle user-facing errors
+            // Fallback: create profile for returning users whose profile row is missing
+            console.log('Profile missing after retry, attempting to create...');
+            const { data: { user: authUser } } = await supabase.auth.getUser();
+            if (authUser?.id === userId) {
+              const { error: insertError } = await supabase
+                .from('profiles')
+                .insert({
+                  id: userId,
+                  email: authUser.email ?? '',
+                  full_name: authUser.user_metadata?.full_name ?? '',
+                  tokens: 3,
+                })
+                .select()
+                .single();
+              if (!insertError) {
+                const { data: newProfile } = await supabase
+                  .from('profiles')
+                  .select('*')
+                  .eq('id', userId)
+                  .single();
+                if (newProfile) {
+                  console.log('Profile created for returning user:', userId);
+                  setProfile(newProfile as Profile);
+                  return;
+                }
+              }
+            }
             setProfile(null);
             return;
           }
@@ -106,76 +133,247 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  // Initialize auth state - require explicit login (no auto-login)
+  // Link anonymous messages (stored with anonymous_session_id in input_data) to the given user
+  const linkAnonymousMessages = async (
+    newUserId: string,
+    options?: { chargeForLinkedMessages?: boolean }
+  ) => {
+    const anonymousSessionId = typeof localStorage !== 'undefined' ? localStorage.getItem('anonymous_session_id') : null;
+
+    console.log('🔗 LINKING DEBUG:', {
+      newUserId,
+      anonymousSessionId,
+      hasSession: !!anonymousSessionId,
+      chargeForLinkedMessages: options?.chargeForLinkedMessages,
+    });
+
+    if (!anonymousSessionId) {
+      console.log('ℹ️ No anonymous session to link');
+      return;
+    }
+
+    try {
+      // Check what messages exist to link (unclaimed, with matching session)
+      const { data: candidates, error: checkError } = await supabase
+        .from('generated_messages')
+        .select('id, user_id, is_preview, input_data')
+        .is('user_id', null)
+        .contains('input_data', { anonymous_session_id: anonymousSessionId });
+
+      console.log('📋 Candidate messages to link:', {
+        count: candidates?.length || 0,
+        messages: candidates,
+        checkError: checkError ?? null,
+      });
+
+      const { data: linked, error } = await supabase
+        .from('generated_messages')
+        .update({
+          user_id: newUserId,
+          is_preview: false,
+        })
+        .is('user_id', null)
+        .contains('input_data', { anonymous_session_id: anonymousSessionId })
+        .select('id, message_type');
+
+      console.log('✅ LINKING RESULT:', {
+        linkedCount: linked?.length || 0,
+        linked,
+        error: error ?? null,
+      });
+
+      if (error) {
+        console.error('❌ Linking error:', error);
+        return;
+      }
+
+      if (linked && linked.length > 0) {
+        console.log(`✅ Successfully linked ${linked.length} messages`);
+        try {
+          localStorage.removeItem('anonymous_session_id');
+        } catch {
+          // ignore
+        }
+
+        // Charge existing user for linked messages when requested (sign-in path)
+        if (options?.chargeForLinkedMessages && linked.length > 0) {
+          const totalCost = linked.reduce(
+            (sum, row) => sum + getTokenCost(row.message_type ?? 'poem'),
+            0
+          );
+          const { data: profile, error: profileError } = await supabase
+            .from('profiles')
+            .select('tokens')
+            .eq('id', newUserId)
+            .single();
+
+          if (profileError || profile == null) {
+            console.warn('⚠️ Could not fetch profile for token deduction:', profileError);
+            return linked;
+          }
+
+          const currentTokens = profile.tokens ?? 0;
+          if (currentTokens >= totalCost) {
+            const { error: updateError } = await supabase
+              .from('profiles')
+              .update({ tokens: currentTokens - totalCost })
+              .eq('id', newUserId);
+
+            if (updateError) {
+              console.error('❌ Failed to deduct tokens for linked messages:', updateError);
+              return linked;
+            }
+
+            for (const row of linked) {
+              const cost = getTokenCost(row.message_type ?? 'poem');
+              const { error: txError } = await supabase.from('token_transactions').insert({
+                user_id: newUserId,
+                transaction_type: 'usage',
+                amount: -cost,
+                description: `Generated ${row.message_type ?? 'message'}`,
+              });
+              if (txError) {
+                console.warn('Token transaction log failed for linked message:', txError.message);
+              }
+            }
+            console.log(`✅ Deducted ${totalCost} tokens for ${linked.length} linked message(s)`);
+          } else {
+            console.warn(
+              `⚠️ Insufficient tokens (have ${currentTokens}, need ${totalCost}); linked messages not charged.`
+            );
+          }
+        }
+      } else {
+        console.warn('⚠️ No messages were linked');
+      }
+
+      return linked;
+    } catch (err) {
+      console.error('❌ Exception in linkAnonymousMessages:', err);
+    }
+  };
+
+  // Initialize auth state: run initial session + profile load first, then subscribe to auth changes
   useEffect(() => {
-    // Set up auth state change listener
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(
-      async (_event: AuthChangeEvent, session: Session | null) => {
-        // Only process auth changes after initial clear is done
-        // This prevents clearing newly created sessions from signup
-        if (!initialClearDoneRef.current) {
+    let subscription: { unsubscribe: () => void } | null = null;
+
+    const initializeAuth = async () => {
+      try {
+        const { data: { session: existingSession }, error: sessionError } = await supabase.auth.getSession();
+
+        if (sessionError) {
+          console.error('Error getting session:', sessionError);
+          setSession(null);
+          setUser(null);
+          setProfile(null);
+          setLoading(false);
+          initialClearDoneRef.current = true;
           return;
         }
 
-        setSession(session);
-        setUser(session?.user ?? null);
-        
-        // Load profile if user exists
-        if (session?.user) {
-          await loadProfile(session.user.id);
+        if (existingSession?.user) {
+          console.log('✅ Existing session found on app start:', existingSession.user.id);
+          setSession(existingSession);
+          setUser(existingSession.user);
+          // Load profile and wait for it before marking loading done (avoids race with listener)
+          await loadProfile(existingSession.user.id);
         } else {
+          console.log('No existing session found');
+          setSession(null);
+          setUser(null);
           setProfile(null);
         }
-        
+      } catch (error) {
+        console.error('Error initializing auth:', error);
+        setSession(null);
+        setUser(null);
+        setProfile(null);
+      } finally {
         setLoading(false);
+        initialClearDoneRef.current = true;
       }
-    );
-
-    // Clear any existing session on app start to prevent auto-login
-    // This ensures users must explicitly sign in when the app starts
-    const clearAutoLogin = async () => {
-      // Check if there's an existing session first (from before app start)
-      const { data: { session: existingSession } } = await supabase.auth.getSession();
-      
-      // Only clear if there's an existing session (from before app start)
-      if (existingSession) {
-        console.log('Clearing existing session on app start to prevent auto-login');
-        await supabase.auth.signOut();
-      }
-      
-      // Clear state immediately
-      setSession(null);
-      setUser(null);
-      setProfile(null);
-      setLoading(false);
-      
-      // Mark initial clear as done so new signups/signins work
-      initialClearDoneRef.current = true;
     };
 
-    // Clear existing session
-    clearAutoLogin();
+    // Run initial auth first so we have one source of truth; then subscribe for sign in/out/refresh
+    (async () => {
+      await initializeAuth();
+      const { data: { subscription: sub } } = supabase.auth.onAuthStateChange(
+        async (_event: AuthChangeEvent, session: Session | null) => {
+          // Skip if this is the same state we just set in initializeAuth (avoids duplicate loadProfile)
+          if (initialClearDoneRef.current) {
+            console.log('Auth state changed:', { event: _event, hasSession: !!session });
+            setSession(session);
+            setUser(session?.user ?? null);
+            if (session?.user) {
+              await loadProfile(session.user.id);
+            } else {
+              setProfile(null);
+            }
+          }
+        }
+      );
+      subscription = sub;
+    })();
 
     return () => {
-      subscription.unsubscribe();
+      subscription?.unsubscribe();
     };
   }, []);
 
   // -------- AUTH METHODS --------
 
   const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    return { error: error?.message ?? null };
+    try {
+      console.log('🔄 Attempting to sign in:', email);
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      
+      if (error) {
+        console.error('❌ Sign in error:', error);
+        return { error: error.message };
+      }
+
+      if (!data.session) {
+        console.error('❌ No session returned from sign in');
+        return { error: 'Sign in failed: No session created' };
+      }
+
+      console.log('✅ Sign in successful:', data.user.id);
+
+      // Link any anonymous messages and charge existing user for them
+      await linkAnonymousMessages(data.user.id, { chargeForLinkedMessages: true });
+      
+      // Wait a moment for auth state to update
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Load profile
+      if (data.user) {
+        await loadProfile(data.user.id);
+      }
+      
+      return { error: null };
+    } catch (err) {
+      console.error('❌ Sign in exception:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Failed to sign in';
+      return { error: errorMessage };
+    }
   };
 
   const signUp = async (email: string, password: string) => {
     try {
       console.log('🔄 Starting signup process for:', email);
-      
+
+      const anonymousSessionId = typeof localStorage !== 'undefined' ? localStorage.getItem('anonymous_session_id') : null;
+
       // Step 1: Create the user account
-      const { data, error } = await supabase.auth.signUp({ email, password });
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            anonymous_session_id: anonymousSessionId ?? undefined,
+          },
+        },
+      });
       
       if (error) {
         console.error('❌ Signup error:', error);
@@ -190,6 +388,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
       const userId = data.user.id;
       console.log('✅ User created:', userId);
+
+      // Link any anonymous messages to the new user (no charge for new sign-up)
+      await linkAnonymousMessages(userId);
 
       // Step 3: Ensure we have a session (sign in if needed)
       let hasSession = !!data.session;
@@ -247,6 +448,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
       // Step 5: Profile will be loaded by onAuthStateChange listener
       console.log('✅ Signup complete');
+
+      // Reload to show linked messages
+      window.location.reload();
+
       return { error: null };
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to create account';
@@ -305,6 +510,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     signUp,
     signOut,
     refreshProfile,
+    linkAnonymousMessages,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -52,7 +52,7 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const { previewId } = await req.json();
+    const { previewId, generatedMessageId } = await req.json();
 
     if (!previewId) {
       return new Response(
@@ -140,6 +140,10 @@ Deno.serve(async (req: Request) => {
       .update({ unlocked_by_user_id: user.id })
       .eq("id", previewId);
 
+    // Prefer full_content (client now sends it); fallback to preview_text for older rows
+    const fullContent =
+      preview.full_content ?? preview.preview_text ?? "";
+
     // Build input_data from preview form_data if available, otherwise reconstruct from preview fields
     const inputData = preview.form_data || {
       name: preview.recipient_name,
@@ -151,39 +155,62 @@ Deno.serve(async (req: Request) => {
       characterLength: preview.character_length,
     };
 
-    const { data: savedMessage, error: messageError } = await supabaseAdmin
-      .from("generated_messages")
-      .insert({
-        user_id: user.id,
-        message_type: preview.message_type,
-        tone: preview.tone,
-        recipient_name: preview.recipient_name,
-        relationship_length: preview.relationship_length,
-        occasion: preview.occasion,
-        additional_details: preview.additional_details,
-        character_length: preview.character_length,
-        generated_content: preview.full_content,
-        input_data: inputData, // Store full form data as JSON
-        is_preview: true, // This message was unlocked from a preview
-      })
-      .select()
-      .single();
+    let savedMessage: { id: string } | null = null;
 
-    if (messageError) {
-      console.error("❌ Failed to save unlocked message to database:", messageError);
-      console.error("   Error details:", {
-        code: messageError.code,
-        message: messageError.message,
-        details: messageError.details,
-        hint: messageError.hint,
-      });
-    } else {
-      console.log("✅ Unlocked message saved to database successfully:", {
-        messageId: savedMessage?.id,
-        messageType: preview.message_type,
-        userId: user.id,
-        wasPreview: true,
-      });
+    if (generatedMessageId) {
+      // Update existing anonymous row with full content and claim it (avoids duplicate in history)
+      const { data: updated, error: updateError } = await supabaseAdmin
+        .from("generated_messages")
+        .update({
+          user_id: user.id,
+          generated_content: fullContent,
+          is_preview: false,
+          input_data: inputData,
+        })
+        .eq("id", generatedMessageId)
+        .or("user_id.is.null,user_id.eq." + user.id)
+        .select("id")
+        .single();
+
+      if (updateError) {
+        console.error("❌ Failed to update existing message with full content:", updateError);
+      } else if (updated) {
+        savedMessage = { id: updated.id };
+        console.log("✅ Updated existing message with full content:", updated.id);
+      }
+    }
+
+    if (!savedMessage) {
+      const { data: inserted, error: messageError } = await supabaseAdmin
+        .from("generated_messages")
+        .insert({
+          user_id: user.id,
+          message_type: preview.message_type,
+          tone: preview.tone,
+          generated_content: fullContent,
+          input_data: inputData,
+          is_preview: true,
+        })
+        .select()
+        .single();
+
+      if (messageError) {
+        console.error("❌ Failed to save unlocked message to database:", messageError);
+        console.error("   Error details:", {
+          code: messageError.code,
+          message: messageError.message,
+          details: messageError.details,
+          hint: messageError.hint,
+        });
+      } else if (inserted) {
+        savedMessage = { id: inserted.id };
+        console.log("✅ Unlocked message saved to database successfully:", {
+          messageId: inserted.id,
+          messageType: preview.message_type,
+          userId: user.id,
+          wasPreview: true,
+        });
+      }
     }
 
     await supabaseAdmin
@@ -196,7 +223,7 @@ Deno.serve(async (req: Request) => {
 
     return new Response(
       JSON.stringify({
-        fullContent: preview.full_content,
+        fullContent,
         message,
         tokensAwarded: tokensAwarded > 0 ? tokensAwarded : undefined,
         messageId: savedMessage?.id || null, // Return messageId for regeneration

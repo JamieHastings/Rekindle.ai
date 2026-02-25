@@ -3,6 +3,7 @@ import { Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Dropdown from './Dropdown';
 import GiftCardTemplateSelector from './GiftCardTemplateSelector';
+import { FEATURES } from '../config/features';
 
 interface MessageFormProps {
   onGenerate: (formData: FormData) => void;
@@ -380,11 +381,13 @@ export default function MessageForm({ onGenerate, isGenerating, onMessageTypeSel
                 required
               />
 
-              <GiftCardTemplateSelector
-                onTemplateSelect={(template) => handleDropdownChange('giftCardTemplate', template)}
-                selectedTemplate={formData.giftCardTemplate || ''}
-                category="gift_card"
-              />
+              {FEATURES.DESIGN_TEMPLATES && (
+                <GiftCardTemplateSelector
+                  onTemplateSelect={(template) => handleDropdownChange('giftCardTemplate', template)}
+                  selectedTemplate={formData.giftCardTemplate || ''}
+                  category="gift_card"
+                />
+              )}
 
               <div>
                 <label htmlFor="giftCardLoverName" className="block text-base font-medium text-text-dark mb-2">
@@ -546,26 +549,46 @@ export default function MessageForm({ onGenerate, isGenerating, onMessageTypeSel
                 required
               />
 
-              <GiftCardTemplateSelector
-                onTemplateSelect={(template) => handleDropdownChange('giftCardTemplate', template)}
-                selectedTemplate={formData.giftCardTemplate || ''}
-                category="love_letter"
-              />
-
-              <div>
-                <label htmlFor="recipientName" className="block text-base font-medium text-text-dark mb-2">
-                  Recipient Name
-                </label>
-                <input
-                  type="text"
-                  id="recipientName"
-                  name="recipientName"
-                  value={formData.recipientName || ''}
-                  onChange={handleChange}
-                  required
-                  className="w-full px-3 py-2 bg-background border border-border rounded-lg text-text-light focus:outline-none focus:ring-2 focus:ring-[#CC4F4E]"
-                  placeholder="e.g., Sarah"
+              {FEATURES.DESIGN_TEMPLATES && (
+                <GiftCardTemplateSelector
+                  onTemplateSelect={(template) => handleDropdownChange('giftCardTemplate', template)}
+                  selectedTemplate={formData.giftCardTemplate || ''}
+                  category="love_letter"
                 />
+              )}
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label htmlFor="recipientName" className="block text-base font-medium text-text-dark mb-2">
+                    Recipient Name
+                  </label>
+                  <input
+                    type="text"
+                    id="recipientName"
+                    name="recipientName"
+                    value={formData.recipientName || ''}
+                    onChange={handleChange}
+                    required
+                    className="w-full px-3 py-2 bg-background border border-border rounded-lg text-text-light focus:outline-none focus:ring-2 focus:ring-[#CC4F4E]"
+                    placeholder="e.g., Sarah"
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="yourName" className="block text-base font-medium text-text-dark mb-2">
+                    Your Name
+                  </label>
+                  <input
+                    type="text"
+                    id="yourName"
+                    name="yourName"
+                    value={formData.yourName || ''}
+                    onChange={handleChange}
+                    required
+                    className="w-full px-3 py-2 bg-background border border-border rounded-lg text-text-light focus:outline-none focus:ring-2 focus:ring-[#CC4F4E]"
+                    placeholder="e.g., John"
+                  />
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">

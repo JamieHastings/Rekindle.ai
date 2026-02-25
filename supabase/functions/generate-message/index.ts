@@ -6,6 +6,7 @@ import { getTokenCost, adjustUserTokens } from "../_shared/tokens.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 
 interface MessageRequest {
+  messageId?: string; // When set, update this stub instead of inserting (template preserved)
   messageType: string;
   promptData: {
     name: string;
@@ -24,6 +25,9 @@ interface MessageRequest {
     [key: string]: any;
   };
   preview?: boolean;
+  templateId?: string; // Template ID if a design template is selected
+  templateUrl?: string; // Template URL if available
+  isPremium?: boolean; // true if this message requires payment (e.g., love letter with template)
 }
 
 function buildPrompt(data: MessageRequest): string {
@@ -50,15 +54,11 @@ function buildPrompt(data: MessageRequest): string {
   };
 
   const messageTypeGuidance: Record<string, string> = {
-    poem: "This is a poem about rekindling a relationship. Focus on positive memories, what was special, and hope for reconnection.",
-    rekindling: "This is about rekindling a relationship. Focus on positive memories, what was special, and hope for reconnection.",
-    apology: "This is an apology message. Focus on taking responsibility, expressing remorse, and showing commitment to change.",
+    poem: "This is a poem. Focus on positive memories, what was special, and emotional connection.",
+    apology: "This is an apology text message, not in a letter format. Focus on taking responsibility, expressing remorse, and showing commitment to change.",
     letter: "This is a love letter. Focus on expressing deep feelings, appreciation, and commitment.",
-    birthday: "This is a birthday message. Focus on celebrating them, expressing appreciation, and making them feel special.",
-    support: "This is a supportive message. Focus on being there for them, offering comfort, and showing you care.",
     text: "This is a voice note script. Write naturally as if speaking directly to them.",
     giftcard: "This is a gift card message. Keep it warm, personal, and heartfelt.",
-    closure: "This is about finding closure. Focus on acceptance, gratitude for shared experiences, and moving forward with peace.",
   };
 
   const recipientName = promptData.name || promptData.loverName || promptData.recipientName || "them";
@@ -146,6 +146,23 @@ Deno.serve(async (req: Request) => {
     // Parse request body
     const requestData: MessageRequest = await req.json();
 
+    // When messageId is provided, we UPDATE an existing stub (template already saved by client)
+    const messageId = requestData.messageId;
+    const isUpdateFlow = !!messageId;
+
+    // Extract template information from request (used only in legacy INSERT flow)
+    const templateId = requestData.templateId;
+    const templateUrl = requestData.templateUrl;
+    const isPremium = requestData.isPremium;
+
+    console.log('📋 Request:', {
+      messageId,
+      isUpdateFlow,
+      messageType: requestData.messageType,
+      hasTemplateId: !!templateId,
+      hasTemplateUrl: !!templateUrl,
+    });
+
     // Validate required fields
     if (!requestData.messageType || !requestData.promptData) {
       return new Response(
@@ -174,13 +191,22 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // Check if this is the user's first message generation
-    const { count: messageCount } = await supabaseAdmin
-      .from("generated_messages")
-      .select("*", { count: "exact", head: true })
-      .eq("user_id", user.id);
-
-    const isFirstMessage = (messageCount || 0) === 0;
+    // First message is free: when updating a stub, count completed messages; otherwise count all
+    let isFirstMessage: boolean;
+    if (isUpdateFlow) {
+      const { count: completedCount } = await supabaseAdmin
+        .from("generated_messages")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", user.id)
+        .neq("generated_content", "");
+      isFirstMessage = (completedCount || 0) === 0;
+    } else {
+      const { count: messageCount } = await supabaseAdmin
+        .from("generated_messages")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", user.id);
+      isFirstMessage = (messageCount || 0) === 0;
+    }
     const isPreview = requestData.preview === true;
 
     // Calculate token cost
@@ -208,6 +234,7 @@ Deno.serve(async (req: Request) => {
     const prompt = buildPrompt(requestData);
 
     // Call OpenAI
+    console.log("🤖 Calling OpenAI API...");
     const fullMessage = await callOpenAI({
       model: "gpt-4o-mini",
       messages: [
@@ -222,6 +249,23 @@ Deno.serve(async (req: Request) => {
       ],
       temperature: 0.85,
       max_tokens: 3000,
+    });
+
+    // Validate that we got content from OpenAI
+    if (!fullMessage || fullMessage.trim().length === 0) {
+      console.error("❌ OpenAI returned empty or null content!");
+      return new Response(
+        JSON.stringify({ error: "Failed to generate message content" }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
+
+    console.log("✅ OpenAI response received:", {
+      contentLength: fullMessage.length,
+      preview: fullMessage.substring(0, 100) + "...",
     });
 
     // Create preview (first 2-3 lines, ~200 chars)
@@ -270,41 +314,105 @@ Deno.serve(async (req: Request) => {
       console.log("🎁 First message is FREE - no tokens deducted");
     }
 
-    // Save message to database using admin client
+    // ✅ UPDATE flow: stub was created by client with template already saved
+    if (isUpdateFlow && messageId) {
+      const { data: updatedMessage, error: updateError } = await supabaseAdmin
+        .from("generated_messages")
+        .update({
+          generated_content: fullMessage,
+          status: "completed",
+        })
+        .eq("id", messageId)
+        .eq("user_id", user.id)
+        .select()
+        .single();
+
+      if (updateError) {
+        console.error("❌ Failed to update message:", updateError);
+        return new Response(
+          JSON.stringify({ error: "Failed to update message", details: updateError.message }),
+          {
+            status: 500,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
+      }
+      console.log("✅ Message updated with content, template preserved:", updatedMessage?.id);
+      return new Response(
+        JSON.stringify({
+          preview: preview,
+          full: fullMessage,
+          messageId: messageId,
+          tokens_remaining: tokenResult.tokens_remaining,
+          is_first_message: isFirstMessage,
+          tokens_deducted: actualTokenCost,
+        }),
+        {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
+
+    // Legacy INSERT flow (no messageId: preview or old client)
+    // Fetch template URL if templateId is provided but templateUrl is not
+    let finalTemplateUrl: string | null = templateUrl || null;
+    if (templateId && !finalTemplateUrl) {
+      console.log('🔍 Fetching template URL for templateId:', templateId);
+      try {
+        const { data: template, error: templateError } = await supabaseAdmin
+          .from("design_templates")
+          .select("image_url")
+          .eq("id", templateId)
+          .eq("is_active", true)
+          .single();
+        
+        if (!templateError && template) {
+          finalTemplateUrl = template.image_url;
+          console.log('✅ Template URL fetched:', finalTemplateUrl);
+        } else {
+          console.error('❌ Error fetching template:', templateError);
+        }
+      } catch (err) {
+        console.error("❌ Exception fetching template:", err);
+      }
+    }
+
+    // Determine if this is a premium message (requires payment)
+    const finalIsPremium = isPremium || 
+      (!!finalTemplateUrl && (requestData.messageType === 'letter' || requestData.messageType === 'love_letter' || requestData.messageType === 'giftcard'));
+
+    const messageData = {
+      user_id: user.id,
+      message_type: requestData.messageType,
+      tone: requestData.promptData.tone || "heartfelt",
+      generated_content: fullMessage,
+      template_url: finalTemplateUrl,
+      paid: finalIsPremium,
+      input_data: requestData.promptData,
+      is_preview: false,
+    };
+
+    if (!messageData.generated_content || messageData.generated_content.trim().length === 0) {
+      return new Response(
+        JSON.stringify({ error: "Generated content is empty. Cannot save message." }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
+
     const { data: savedMessage, error: saveError } = await supabaseAdmin
       .from("generated_messages")
-      .insert({
-        user_id: user.id,
-        message_type: requestData.messageType,
-        tone: requestData.promptData.tone || "heartfelt",
-        recipient_name: requestData.promptData.name || requestData.promptData.loverName || requestData.promptData.recipientName || "",
-        relationship_length: requestData.promptData.relationshipLength || "",
-        occasion: requestData.promptData.occasion || null,
-        additional_details: requestData.promptData.additionalDetails || null,
-        character_length: requestData.promptData.characterLength || "medium",
-        generated_content: fullMessage,
-        input_data: requestData.promptData, // Store full form data as JSON
-        is_preview: false, // This is a direct generation, not from preview
-      })
+      .insert(messageData)
       .select()
       .single();
 
     if (saveError) {
       console.error("❌ Failed to save message to database:", saveError);
-      console.error("   Error details:", {
-        code: saveError.code,
-        message: saveError.message,
-        details: saveError.details,
-        hint: saveError.hint,
-      });
-      // Don't fail the request, message was generated successfully
-      // But log the error for debugging
     } else {
-      console.log("✅ Message saved to database successfully:", {
-        messageId: savedMessage?.id,
-        messageType: requestData.messageType,
-        userId: user.id,
-      });
+      console.log("✅ Message saved to database successfully:", savedMessage?.id);
     }
 
     return new Response(

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Copy, Check, RotateCcw, Loader2, Download, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import PDFPreviewModal from './PDFPreviewModal';
@@ -30,8 +30,46 @@ export default function MessageDisplay({
   recipientName,
   messageType,
 }: MessageDisplayProps) {
+  const firstMountRef = useRef(true);
+  // #region agent log
+  (() => {
+    const isFirstMount = firstMountRef.current;
+    if (isFirstMount) firstMountRef.current = false;
+    fetch('http://127.0.0.1:7242/ingest/b82c46f0-2300-44a2-a8cb-ae7c62dc77a5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'MessageDisplay.tsx:render',message:isFirstMount?'H5: First mount props':'MessageDisplay received props',data:{firstMount:isFirstMount,hasMessage:!!message,messageLength:message?.length??0,templateUrl:templateUrl??null,hasTemplateUrl:!!templateUrl,messageType:messageType??null},hypothesisId:'H5',timestamp:Date.now()})}).catch(()=>{});
+  })();
+  // #endregion
   const [copied, setCopied] = useState(false);
   const [showPDFPreview, setShowPDFPreview] = useState(false);
+  const [backgroundLoaded, setBackgroundLoaded] = useState(false);
+
+  // Preload background image before allowing PDF preview/download
+  useEffect(() => {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/b82c46f0-2300-44a2-a8cb-ae7c62dc77a5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'MessageDisplay.tsx:useEffect-preload',message:'Preload effect run',data:{templateUrl:templateUrl??null,hasTemplateUrl:!!templateUrl},hypothesisId:'H4',timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    if (templateUrl) {
+      setBackgroundLoaded(false);
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+
+      img.onload = () => {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/b82c46f0-2300-44a2-a8cb-ae7c62dc77a5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'MessageDisplay.tsx:image-onload',message:'H5: Background image onload (effect closure)',data:{templateUrl:templateUrl??null},hypothesisId:'H5',timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
+        console.log('✅ Background loaded:', templateUrl);
+        setBackgroundLoaded(true);
+      };
+
+      img.onerror = (err) => {
+        console.error('❌ Background failed to load:', err);
+        setBackgroundLoaded(false);
+      };
+
+      img.src = templateUrl;
+    } else {
+      setBackgroundLoaded(true); // No template, ready to go
+    }
+  }, [templateUrl]);
 
   const handleCopy = async () => {
     if (message) {
@@ -40,17 +78,6 @@ export default function MessageDisplay({
       setTimeout(() => setCopied(false), 2000);
     }
   };
-
-  const handleDownload = () => {
-    const blob = new Blob([message], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'rekindle_message.txt';
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
 
   if (isGenerating) {
     return (
@@ -228,15 +255,31 @@ export default function MessageDisplay({
             </AnimatePresence>
           </motion.button>
 
-          <motion.button
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-            onClick={() => setShowPDFPreview(true)}
-            className="px-4 py-3 bg-background border border-border text-text-light rounded-lg hover:bg-panel transition-all shadow-lg font-medium flex items-center justify-center gap-2"
-          >
-            <Download className="w-5 h-5" />
-            Download PDF
-          </motion.button>
+          {(messageType === 'letter' || messageType === 'love_letter' || messageType === 'giftcard') && (
+            <motion.button
+              whileHover={backgroundLoaded ? { scale: 1.02 } : {}}
+              whileTap={backgroundLoaded ? { scale: 0.98 } : {}}
+              onClick={() => backgroundLoaded && setShowPDFPreview(true)}
+              disabled={!!templateUrl && !backgroundLoaded}
+              className={`px-4 py-3 rounded-lg transition-all shadow-lg font-medium flex items-center justify-center gap-2 ${
+                templateUrl && !backgroundLoaded
+                  ? 'bg-background border border-border text-text-light cursor-wait opacity-70'
+                  : 'bg-background border border-border text-text-light hover:bg-panel disabled:opacity-50 disabled:cursor-not-allowed'
+              }`}
+            >
+              {templateUrl && !backgroundLoaded ? (
+                <>
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  Loading template...
+                </>
+              ) : (
+                <>
+                  <Download className="w-5 h-5" />
+                  Preview / Download PDF
+                </>
+              )}
+            </motion.button>
+          )}
         </motion.div>
 
         <motion.div
@@ -263,18 +306,20 @@ export default function MessageDisplay({
           </motion.button>
         </motion.div>
 
-        {/* PDF Preview Modal */}
-        <PDFPreviewModal
-          isOpen={showPDFPreview}
-          onClose={() => setShowPDFPreview(false)}
-          message={message}
-          templateUrl={templateUrl}
-          templateGradient={templateGradient}
-          borderColor={borderColor}
-          accentColor={accentColor}
-          recipientName={recipientName}
-          messageType={messageType}
-        />
+        {/* PDF Preview Modal - only for letter and giftcard */}
+        {(messageType === 'letter' || messageType === 'love_letter' || messageType === 'giftcard') && (
+          <PDFPreviewModal
+            isOpen={showPDFPreview}
+            onClose={() => setShowPDFPreview(false)}
+            message={message}
+            templateUrl={templateUrl}
+            templateGradient={templateGradient}
+            borderColor={borderColor}
+            accentColor={accentColor}
+            recipientName={recipientName}
+            messageType={messageType}
+          />
+        )}
       </motion.div>
     </AnimatePresence>
   );

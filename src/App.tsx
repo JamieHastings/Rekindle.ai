@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Coins, LogOut, LayoutDashboard, Home as HomeIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import MessageForm, { FormData } from './components/MessageForm';
@@ -11,33 +11,17 @@ import Dashboard from './pages/Dashboard';
 import AdminDashboard from './pages/admin/AdminDashboard';
 import { useAuth } from './contexts/AuthContext';
 import { supabase } from './lib/supabase';
-import { mapFormDataToBackend } from './utils/formMapper';
 import { SessionManager, MAX_PREVIEWS } from './utils/sessionManager';
 import { PreviewService } from './services/previewService';
 import PreviewMessageDisplay from './components/PreviewMessageDisplay';
 import UnlockPreviewModal from './components/UnlockPreviewModal';
-import { getTokenCost, addTokens } from './services/tokenService';
+import { getTokenCost } from './services/tokenService';
+import { generateMessage } from './services/messageGenerator';
+import PaymentModal from './components/PaymentModal';
+import ErrorBoundary from './components/ErrorBoundary';
+import { FEATURES } from './config/features';
 
 type View = 'home' | 'generator' | 'dashboard' | 'admin';
-
-// Helper function to format message type names
-const getMessageTypeLabel = (type: string): string => {
-  const labels: { [key: string]: string } = {
-    'poem': 'Poem',
-    'letter': 'Love Letter',
-    'love_letter': 'Love Letter',
-    'apology': 'Apology',
-    'rekindling': 'Rekindling Message',
-    'text': 'Text Message',
-    'giftcard': 'Gift Card',
-    'voicenote': 'Voice Note',
-    'birthday': 'Birthday Message',
-    'support': 'Support Message',
-    'closure': 'Closure Message',
-  };
-  
-  return labels[type] || type;
-};
 
 function App() {
   const { user, profile, signOut, refreshProfile, loading } = useAuth();
@@ -49,19 +33,30 @@ function App() {
   const [error, setError] = useState('');
   const [currentFormData, setCurrentFormData] = useState<FormData | null>(null);
   const [showGiftCardTemplate, setShowGiftCardTemplate] = useState(false);
-  const [selectedTemplate, setSelectedTemplate] = useState('romantic-hearts');
+  const [selectedTemplate, setSelectedTemplate] = useState<string>('');
+  const [selectedTemplateUrl, setSelectedTemplateUrl] = useState<string>('');
+  const [selectedTemplateData, setSelectedTemplateData] = useState<{
+    url?: string;
+    gradient?: string;
+    borderColor?: string;
+    accentColor?: string;
+  } | null>(null);
   const [showGiftCardEmail, setShowGiftCardEmail] = useState(false);
   const [messageTypeSelected, setMessageTypeSelected] = useState(false);
   const [isPreviewMode, setIsPreviewMode] = useState(false);
   const [previewId, setPreviewId] = useState<string>('');
+  /** Id of the generated_messages row for the current preview (so unlock can update it with full content instead of inserting a duplicate). */
+  const [previewGeneratedMessageId, setPreviewGeneratedMessageId] = useState<string | null>(null);
   const [showUnlockModal, setShowUnlockModal] = useState(false);
   const [remainingPreviews, setRemainingPreviews] = useState(3);
   const [lastGeneratedMessageId, setLastGeneratedMessageId] = useState<string | null>(null);
-  const [tokenModalDetails, setTokenModalDetails] = useState<{
-    tokensRequired?: number;
-    action?: string;
-    messageType?: string;
-  }>({});
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+
+  // H2/H5 fix: ref holds template URL from same tick as generation so first render after setGeneratedMessage has it even if state hasn't flushed
+  const templateUrlRef = useRef<string>('');
+  const templateDataRef = useRef<{ gradient?: string; borderColor?: string; accentColor?: string } | null>(null);
+  /** Full preview message (so unlock modal can show full content after sign-up instead of partial). */
+  const fullPreviewMessageRef = useRef<string | null>(null);
 
   // Refresh profile when user logs in
   useEffect(() => {
@@ -120,38 +115,27 @@ function App() {
   // }, [user, profile, loading, currentView]);
 
   // Reset view when user logs out (but allow anonymous users to use generator)
-  // Only reset if we were on a protected view (dashboard/admin) and user logs out
+  // Role-based route protection and view management
   useEffect(() => {
-    if (!user && !loading && (currentView === 'dashboard' || currentView === 'admin')) {
-      console.log('User logged out from protected view, resetting to home');
-      setCurrentView('home');
-      setShowAuthModal(false);
-    }
-  }, [user, loading, currentView]);
-
-  // Role-based route protection: Redirect non-admin users away from admin routes only
-  useEffect(() => {
+    // Redirect non-admin users away from admin routes
     if (user && profile && !loading && currentView === 'admin') {
       const isAdmin = Boolean(profile.is_admin);
       if (!isAdmin) {
-        // Non-admin user trying to access admin route - redirect to home
         console.warn('Non-admin user attempted to access admin route, redirecting...');
         setCurrentView('home');
       }
     }
     
-    // Only redirect to home if user explicitly logged out
-    // Don't redirect on signup (when there's a generated message)
+    // Redirect to home if user logs out from protected views
     if (!user && !loading && (currentView === 'dashboard' || currentView === 'admin')) {
       console.log('User logged out from protected view, resetting to home');
       setCurrentView('home');
       setShowAuthModal(false);
     }
     
-    // NEW: Don't reset view or message on signup
+    // Keep generator view when user signs up with generated message
     if (user && generatedMessage && currentView === 'generator') {
       console.log('User signed up with generated message - keeping on generator view');
-      // Stay on generator view to show the message
       setMessageTypeSelected(true);
       setIsPreviewMode(false);
     }
@@ -199,18 +183,15 @@ function App() {
         sessionId: session.id,
         previewCount: session.previewCount,
         canGeneratePreview: session.canGeneratePreview,
-        maxPreviews: 3
+        maxPreviews: MAX_PREVIEWS,
       });
-      
+
       if (!session.canGeneratePreview) {
-        console.log('⚠️ Preview limit reached, showing auth modal');
-        console.log('💡 To reset preview count for testing, run in console:');
-        console.log('   SessionManager.resetPreviewCount()');
+        console.log('⚠️ Preview limit reached');
         setError(`You've used all ${MAX_PREVIEWS} free previews. Please sign up to continue generating messages!`);
-        setShowAuthModal(true);
         return;
       }
-      
+
       console.log('✅ Preview generation allowed, proceeding...');
 
       setCurrentFormData(formData);
@@ -222,30 +203,57 @@ function App() {
       try {
         console.log('🔄 Starting preview generation for anonymous user');
         console.log('📝 Message type:', formData.messageType);
-        console.log('📋 Form data:', formData);
-        
-        const backendFormData = mapFormDataToBackend(formData);
-        console.log('✅ Form data mapped to backend format:', backendFormData);
-        
-        console.log('🚀 Calling PreviewService.generatePreview()...');
-        const preview = await PreviewService.generatePreview(backendFormData);
-        
-        console.log('✅ Preview generated successfully:', {
-          previewId: preview.previewId,
-          partialContentLength: preview.partialContent.length,
-          remainingPreviews: preview.remainingPreviews
-        });
-        
+
+        const preview = await PreviewService.generatePreview(formData);
+        console.log('✅ Preview generated successfully');
+
+        // Anonymous session ID for linking on signup
+        const anonymousSessionId = localStorage.getItem('anonymous_session_id') || crypto.randomUUID();
+        if (!localStorage.getItem('anonymous_session_id')) {
+          localStorage.setItem('anonymous_session_id', anonymousSessionId);
+          console.log('🆔 Created anonymous session:', anonymousSessionId);
+        }
+
+        const { data: savedMessage, error: saveError } = await supabase
+          .from('generated_messages')
+          .insert({
+            user_id: null,
+            message_type: formData.messageType,
+            input_data: {
+              name: formData.loverName || formData.recipientName || formData.apologyLoverName || formData.voicenoteLoverName || formData.giftCardLoverName || '',
+              tone: formData.tone || formData.poemTone || formData.apologyTone || formData.voicenoteTone || formData.giftCardTone || 'heartfelt',
+              relationshipLength: formData.relationshipLength || '',
+              additionalDetails: formData.additionalDetails || formData.whatHappened || formData.significantMessage || formData.voicenoteSignificantMessage || formData.giftCardWhatHappened || '',
+              occasion: formData.occasion || '',
+              anonymous_session_id: anonymousSessionId,
+            },
+            tone: formData.tone || formData.poemTone || formData.apologyTone || formData.voicenoteTone || formData.giftCardTone || 'heartfelt',
+            character_length: formData.length || formData.characterLength || formData.apologyLength || formData.voicenoteLength || 'medium',
+            generated_content: preview.fullMessage,
+            is_preview: true,
+            status: 'completed',
+          })
+          .select()
+          .single();
+
+        if (saveError) {
+          console.error('❌ Error saving anonymous message:', saveError);
+          setPreviewId(preview.previewId || '');
+          setPreviewGeneratedMessageId(null);
+        } else {
+          console.log('✅ Anonymous message saved to database:', savedMessage?.id);
+          setPreviewId(preview.previewId || savedMessage?.id || '');
+          setPreviewGeneratedMessageId(savedMessage?.id ?? null);
+        }
+
+        fullPreviewMessageRef.current = preview.fullMessage;
         setGeneratedMessage(preview.partialContent);
-        setPreviewId(preview.previewId);
         setRemainingPreviews(preview.remainingPreviews);
-        
         console.log('✅ Preview displayed to user');
       } catch (err) {
         console.error('❌ Error generating preview:', err);
         const errorMessage = err instanceof Error ? err.message : 'Failed to generate preview';
-        
-        // Provide more helpful error messages - DO NOT show auth modal for technical errors
+
         if (errorMessage.includes('OpenAI API key') || errorMessage.includes('VITE_OPENAI_API_KEY')) {
           setError('OpenAI API key is missing. Please add VITE_OPENAI_API_KEY to .env.local file and restart the dev server.');
         } else if (errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
@@ -255,9 +263,7 @@ function App() {
         } else if (errorMessage.includes('quota')) {
           setError('OpenAI account has insufficient quota. Please check your billing.');
         } else if (errorMessage.includes('Preview limit reached')) {
-          // This is the only case where we should show auth modal
           setError(`You've used all ${MAX_PREVIEWS} free previews. Please sign up to continue generating messages!`);
-          setShowAuthModal(true);
         } else {
           setError(`Failed to generate preview: ${errorMessage}. Please try again.`);
         }
@@ -267,14 +273,9 @@ function App() {
       return;
     }
 
-    // Check if user has enough tokens (minimum 5 for most message types, 15 for giftcard/love_letter)
+    // Check if user has enough tokens (costs vary by type: 5 for letter/gift card, 3 for poem/apology/birthday, etc.)
     const tokenCost = getTokenCost(formData.messageType);
     if (!profile || profile.tokens < tokenCost) {
-      setTokenModalDetails({
-        tokensRequired: tokenCost,
-        action: 'generate this message',
-        messageType: getMessageTypeLabel(formData.messageType),
-      });
       setShowTokenModal(true);
       return;
     }
@@ -287,6 +288,11 @@ function App() {
     setIsPreviewMode(false);
 
     try {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/b82c46f0-2300-44a2-a8cb-ae7c62dc77a5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:handleGenerate-start',message:'Generation flow started',data:{messageType:formData.messageType},hypothesisId:'H1',timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+      templateUrlRef.current = '';
+      templateDataRef.current = null;
       console.log('📝 Generating message for authenticated user');
       console.log('  - Message type:', formData.messageType);
       console.log('  - User ID:', user.id);
@@ -300,7 +306,9 @@ function App() {
         console.error('Session error:', sessionError);
         throw new Error('Authentication session expired. Please sign in again.');
       }
-
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/b82c46f0-2300-44a2-a8cb-ae7c62dc77a5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:after-session',message:'Session obtained',data:{},hypothesisId:'H2',timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       console.log('✅ Valid session obtained');
 
       // Prepare prompt data
@@ -319,119 +327,217 @@ function App() {
         promptData.characterLength = formData.characterLength || formData.length || formData.apologyLength || formData.voicenoteLength || 'medium';
       }
 
-      console.log('🚀 Calling generate-message edge function...');
+      // Letter-specific: so promptEngine gets recipient_name and your_name for the love letter template
+      if (formData.messageType === 'letter') {
+        promptData.recipientName = formData.recipientName ?? '';
+        promptData.yourName = formData.yourName ?? '';
+        promptData.length = formData.length ?? promptData.characterLength ?? 'medium';
+        promptData.keyPoints = formData.keyPoints ?? '';
+      }
 
-      // Call edge function with proper headers
-      const { data: result, error: invokeError } = await supabase.functions.invoke('generate-message', {
-        body: {
-          messageType: formData.messageType,
-          promptData: promptData,
-          preview: false,
-        },
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-        },
-      });
+      // Apology-specific: so promptEngine gets lover_name and context for the apology template (no placeholders)
+      if (formData.messageType === 'apology') {
+        promptData.apologyLoverName = formData.apologyLoverName ?? '';
+        promptData.significantMessage = formData.significantMessage ?? '';
+        promptData.apologyLength = formData.apologyLength ?? promptData.characterLength ?? 'medium';
+        promptData.apologyTone = formData.apologyTone ?? 'sincere';
+        promptData.apologyDescription = formData.apologyDescription ?? '';
+      }
 
-      if (invokeError) {
-        console.error('❌ Edge function error:', invokeError);
+      // Check if a template is selected (for letter type with template selector)
+      let templateId: string | undefined;
+      let templateUrl: string | undefined;
+
+      // For letter or giftcard, check if template is selected via GiftCardTemplateSelector
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/b82c46f0-2300-44a2-a8cb-ae7c62dc77a5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:template-branch',message:'Template branch check',data:{messageType:formData.messageType,giftCardTemplate:formData.giftCardTemplate ?? null,willEnterBranch:!!((formData.messageType==='letter'||formData.messageType==='giftcard')&&formData.giftCardTemplate)},hypothesisId:'H1',timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+      if ((formData.messageType === 'letter' || formData.messageType === 'giftcard') && formData.giftCardTemplate) {
+        templateId = formData.giftCardTemplate;
+        console.log('🎨 Template selected for letter:', templateId);
         
-        // Check if it's an insufficient tokens error
-        if (invokeError.message?.includes('Insufficient tokens') || invokeError.status === 402) {
-          // Try to extract token details from error response
-          const errorData = (invokeError as any).error || {};
-          const tokensRequired = errorData.tokens_required || tokenCost;
+        // Fetch template URL
+        try {
+          const { data: template, error: templateError } = await supabase
+            .from('design_templates')
+            .select('image_url, preview_gradient, border_color, accent_color')
+            .eq('id', templateId)
+            .eq('is_active', true)
+            .single();
           
-          setTokenModalDetails({
-            tokensRequired: tokensRequired,
-            action: 'generate this message',
-            messageType: getMessageTypeLabel(formData.messageType),
-          });
-          setError(invokeError.message || 'Insufficient tokens');
-          setShowTokenModal(true);
-          return;
+          if (!templateError && template) {
+            templateUrl = template.image_url;
+            setSelectedTemplate(templateId);
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/b82c46f0-2300-44a2-a8cb-ae7c62dc77a5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:before-setSelectedTemplateUrl',message:'H2: about to call setSelectedTemplateUrl (order check)',data:{url:template.image_url,seq:'A'},hypothesisId:'H2',timestamp:Date.now()})}).catch(()=>{});
+            // #endregion
+            templateUrlRef.current = template.image_url;
+            templateDataRef.current = { gradient: template.preview_gradient, borderColor: template.border_color, accentColor: template.accent_color };
+            setSelectedTemplateUrl(template.image_url);
+            setSelectedTemplateData({
+              url: template.image_url,
+              gradient: template.preview_gradient,
+              borderColor: template.border_color,
+              accentColor: template.accent_color,
+            });
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/b82c46f0-2300-44a2-a8cb-ae7c62dc77a5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:after-setSelectedTemplateUrl',message:'State set after template fetch',data:{templateImageUrl:template.image_url},hypothesisId:'H2',timestamp:Date.now()})}).catch(()=>{});
+            // #endregion
+            console.log('✅ Template URL fetched:', templateUrl);
+          } else {
+            console.error('❌ Error fetching template:', templateError);
+          }
+        } catch (err) {
+          console.error('❌ Exception fetching template:', err);
         }
-        
-        throw invokeError;
       }
 
-      if (!result) {
-        throw new Error('No data returned from edge function');
+      // For giftcard type, template is selected after generation
+      // We'll handle that separately when the template is selected
+
+      // Step 1: Save message stub
+      const { data: messageStub, error: stubError } = await supabase
+        .from('generated_messages')
+        .insert({
+          user_id: user?.id || null,
+          message_type: formData.messageType,
+          template_id: templateId || null,
+          template_url: templateUrl || null,
+          input_data: promptData,
+          tone: formData.tone || promptData.tone || 'heartfelt',
+          character_length: formData.length || formData.characterLength || 'medium',
+          generated_content: '',
+          status: 'generating',
+          is_preview: !user,
+          paid: !!templateId,
+        })
+        .select()
+        .single();
+
+      if (stubError) {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/b82c46f0-2300-44a2-a8cb-ae7c62dc77a5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:stub-error',message:'Stub insert failed',data:{error:stubError?.message},hypothesisId:'H3',timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
+        console.error('Error creating message stub:', stubError);
+        setError(stubError.message || 'Failed to create message');
+        setIsGenerating(false);
+        return;
       }
 
-      console.log('✅ Message generated successfully:', {
-        messageId: result.messageId,
-        tokens_remaining: result.tokens_remaining,
-        tokens_deducted: result.tokens_deducted,
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/b82c46f0-2300-44a2-a8cb-ae7c62dc77a5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:stub-created',message:'Message stub created',data:{stubId:messageStub?.id,template_id:templateId??null,template_url:templateUrl??null},hypothesisId:'H2',timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+      console.log('✅ Message stub created:', {
+        id: messageStub?.id,
+        template_id: templateId,
+        template_url: templateUrl,
       });
 
-      // Store message ID for regeneration
-      if (result.messageId) {
-        setLastGeneratedMessageId(result.messageId);
-        console.log('💾 Message ID stored:', result.messageId);
-      }
+      try {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/b82c46f0-2300-44a2-a8cb-ae7c62dc77a5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:before-generateMessage',message:'About to call OpenAI',data:{},hypothesisId:'H4',timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
+        console.log('🤖 Generating message...');
 
-      // Display the message
-      if (result.full) {
-        setGeneratedMessage(result.full);
-      } else {
-        throw new Error('No message content in response');
-      }
+        const GENERATE_TIMEOUT_MS = 90000;
+        const generatedText = await Promise.race([
+          generateMessage(formData.messageType, promptData),
+          new Promise<string>((_, reject) =>
+            setTimeout(() => reject(new Error('Generation timed out. Please try again.')), GENERATE_TIMEOUT_MS)
+          ),
+        ]);
 
-      // Refresh profile to get updated token count
-      await refreshProfile();
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/b82c46f0-2300-44a2-a8cb-ae7c62dc77a5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:after-generateMessage',message:'OpenAI returned',data:{length:generatedText?.length},hypothesisId:'H4',timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
+        console.log('✅ Message generated');
 
-      // Show gift card template if applicable
-      if (formData.messageType === 'giftcard') {
-        setShowGiftCardTemplate(true);
+        const { error: updateError } = await supabase
+          .from('generated_messages')
+          .update({
+            generated_content: generatedText,
+            status: 'completed',
+          })
+          .eq('id', messageStub.id);
+
+        if (updateError) throw updateError;
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/b82c46f0-2300-44a2-a8cb-ae7c62dc77a5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:after-db-update',message:'DB update done',data:{},hypothesisId:'H5',timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
+
+        const { error: tokenError } = await supabase
+          .from('profiles')
+          .update({ tokens: profile.tokens - tokenCost })
+          .eq('id', user.id);
+
+        if (tokenError) throw tokenError;
+
+        // Optional audit log (same for all message types). Never block showing the result.
+        const { error: txError } = await supabase.from('token_transactions').insert({
+          user_id: user.id,
+          transaction_type: 'usage',
+          amount: -tokenCost,
+          description: `Generated ${formData.messageType}`,
+        });
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/b82c46f0-2300-44a2-a8cb-ae7c62dc77a5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:after-token-transaction',message:'Token transaction done',data:{txError:txError?.message||null},hypothesisId:'H5',timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
+        if (txError) {
+          console.warn('Token transaction log failed (schema may differ); generation still succeeded:', txError.message);
+        }
+
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/b82c46f0-2300-44a2-a8cb-ae7c62dc77a5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:before-setGeneratedMessage',message:'H2: about to call setGeneratedMessage (order check)',data:{messageLength:generatedText?.length??0,seq:'B'},hypothesisId:'H2',timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
+        setGeneratedMessage(generatedText);
+        setLastGeneratedMessageId(messageStub.id);
+        // Refresh profile in background so a hang never blocks clearing the loading state
+        refreshProfile().catch(() => {});
+
+        if (formData.messageType === 'giftcard') {
+          setShowGiftCardTemplate(true);
+        }
+      } catch (genErr) {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/b82c46f0-2300-44a2-a8cb-ae7c62dc77a5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:inner-catch',message:'Generation error',data:{err:genErr instanceof Error ? genErr.message : String(genErr)},hypothesisId:'H7',timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
+        console.error('❌ Generation error:', genErr);
+        const errMsg = genErr instanceof Error ? genErr.message : 'Generation failed';
+        if (errMsg.includes('Insufficient tokens')) {
+          setError(errMsg);
+          setShowTokenModal(true);
+        } else {
+          setError(errMsg);
+        }
+      } finally {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/b82c46f0-2300-44a2-a8cb-ae7c62dc77a5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:inner-finally',message:'Inner finally - setIsGenerating(false)',data:{},hypothesisId:'H8',timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
+        setIsGenerating(false);
       }
     } catch (err) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/b82c46f0-2300-44a2-a8cb-ae7c62dc77a5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:outer-catch',message:'Outer catch',data:{err:err instanceof Error ? err.message : String(err)},hypothesisId:'H7',timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       console.error('❌ Error generating message:', err);
       const errorMessage = err instanceof Error ? err.message : 'Failed to generate message';
       
       if (errorMessage.includes('Insufficient tokens')) {
-        // Try to get token cost from current form data if available
-        const tokenCost = currentFormData ? getTokenCost(currentFormData.messageType) : 5;
-        setTokenModalDetails({
-          tokensRequired: tokenCost,
-          action: 'generate this message',
-          messageType: currentFormData ? getMessageTypeLabel(currentFormData.messageType) : undefined,
-        });
         setError(errorMessage);
         setShowTokenModal(true);
       } else if (errorMessage.includes('session expired') || errorMessage.includes('Authentication')) {
         setError('Your session expired. Please sign in again.');
         await signOut();
-        setShowAuthModal(true);
       } else if (errorMessage.includes('OpenAI')) {
         setError('AI service error. Please try again.');
       } else {
         setError(`Failed to generate message: ${errorMessage}`);
       }
     } finally {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/b82c46f0-2300-44a2-a8cb-ae7c62dc77a5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:outer-finally',message:'Outer finally - setIsGenerating(false)',data:{},hypothesisId:'H8',timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       setIsGenerating(false);
-    }
-  };
-
-  const handlePurchaseTokens = async (tokenCount: number, paymentId?: string) => {
-    if (!user || !profile) return;
-
-    try {
-      console.log(`💳 Adding ${tokenCount} tokens to user account...`);
-      const addResult = await addTokens(
-        tokenCount,
-        'purchase',
-        paymentId,
-        { purchased_at: new Date().toISOString() }
-      );
-      
-      console.log(`✅ Tokens added. New balance: ${addResult.tokens_remaining}`);
-      await refreshProfile();
-      setShowTokenModal(false);
-    } catch (err) {
-      console.error('Error purchasing tokens:', err);
-      const errorMessage = err instanceof Error ? err.message : 'Failed to purchase tokens';
-      setError(errorMessage);
     }
   };
 
@@ -491,10 +597,6 @@ function App() {
 
     // Check if user has enough tokens for regeneration (2 tokens)
     if (currentTokens < REGENERATE_TOKEN_COST) {
-      setTokenModalDetails({
-        tokensRequired: REGENERATE_TOKEN_COST,
-        action: 'regenerate your message',
-      });
       setError(`Insufficient tokens. You need ${REGENERATE_TOKEN_COST} tokens to regenerate. You currently have ${currentTokens} tokens.`);
       setShowTokenModal(true);
       return;
@@ -540,14 +642,6 @@ function App() {
         
         // Check if it's an insufficient tokens error (402)
         if (invokeError.message?.includes('Insufficient tokens') || invokeError.status === 402) {
-          // Try to extract token details from error response
-          const errorData = (invokeError as any).error || {};
-          const tokensRequired = errorData.tokens_required || REGENERATE_TOKEN_COST;
-          
-          setTokenModalDetails({
-            tokensRequired: tokensRequired,
-            action: 'regenerate your message',
-          });
           setError(invokeError.message || 'Insufficient tokens');
           setShowTokenModal(true);
           return;
@@ -597,16 +691,11 @@ function App() {
       const errorMessage = err instanceof Error ? err.message : 'Failed to regenerate message';
       
       if (errorMessage.includes('Insufficient tokens')) {
-        setTokenModalDetails({
-          tokensRequired: 2,
-          action: 'regenerate your message',
-        });
         setError(errorMessage);
         setShowTokenModal(true);
       } else if (errorMessage.includes('session expired') || errorMessage.includes('Authentication')) {
         setError('Your session expired. Please sign in again.');
         await signOut();
-        setShowAuthModal(true);
       } else {
         setError(errorMessage);
       }
@@ -615,8 +704,37 @@ function App() {
     }
   };
 
-  const handleTemplateSelect = (template: string) => {
-    setSelectedTemplate(template);
+  const handleTemplateSelect = async (templateId: string) => {
+    setSelectedTemplate(templateId);
+    console.log('🎨 Template selected:', templateId);
+    
+    // Fetch template data when template is selected
+    try {
+      const { data: template, error: templateError } = await supabase
+        .from('design_templates')
+        .select('image_url, preview_gradient, border_color, accent_color')
+        .eq('id', templateId)
+        .eq('is_active', true)
+        .single();
+      
+      if (!templateError && template) {
+        setSelectedTemplateUrl(template.image_url);
+        setSelectedTemplateData({
+          url: template.image_url,
+          gradient: template.preview_gradient,
+          borderColor: template.border_color,
+          accentColor: template.accent_color,
+        });
+        console.log('✅ Template data fetched:', {
+          url: template.image_url,
+          hasGradient: !!template.preview_gradient
+        });
+      } else {
+        console.error('❌ Error fetching template:', templateError);
+      }
+    } catch (err) {
+      console.error('❌ Exception fetching template:', err);
+    }
   };
 
   const handleSendGiftCard = () => {
@@ -732,22 +850,22 @@ function App() {
     }
   }
   
-  // Also handle dashboard view when admin user navigates to it
-  // Admin users should see AdminDashboard even when clicking "Dashboard"
-  if (user && currentView === 'dashboard' && isAdminUser && !loading && profile) {
-    console.log('Admin user navigated to dashboard, showing AdminDashboard');
-    return <AdminDashboard onNavigate={setCurrentView} />;
-  }
 
   // Regular users see regular Dashboard
-  // Only show regular dashboard if:
-  // 1. User is signed in
-  // 2. Profile is loaded (not loading)
-  // 3. User is NOT an admin
-  if (currentView === 'dashboard' && user && !loading && profile && !isAdminUser) {
+  // Show dashboard if user is signed in (don't wait for profile to load)
+  if (currentView === 'dashboard' && user) {
+    // If profile is loaded and user is definitely an admin, show admin dashboard
+    if (profile && isAdminUser) {
+      console.log('Admin user navigated to dashboard, showing AdminDashboard');
+      return <AdminDashboard onNavigate={setCurrentView} />;
+    }
+    
+    // For all other cases (profile loading, profile null, or not admin), show regular dashboard
+    // Dashboard component will handle its own loading state
     return (
-      <div className="min-h-screen bg-background">
-        <nav className="bg-panel border-b border-border">
+      <ErrorBoundary>
+        <div className="min-h-screen bg-background">
+          <nav className="bg-panel border-b border-border">
           <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
             <motion.div
               className="flex items-center gap-2 cursor-pointer"
@@ -778,15 +896,19 @@ function App() {
                 <span className="hidden md:inline">Dashboard</span>
               </motion.button>
 
-              <motion.div
+              <motion.button
+                type="button"
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
-                className="flex items-center gap-2 px-4 py-2 bg-background border border-border rounded-lg"
+                onClick={() => setShowTokenModal(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-background border border-border rounded-lg cursor-pointer hover:border-[#CC4F4E] transition-colors"
               >
                 <Coins className="w-5 h-5 text-[#CC4F4E]" />
                 <span className="text-text-dark font-medium">{profile?.tokens || 0}</span>
                 <span className="text-text-light text-sm hidden md:inline">tokens</span>
-              </motion.div>
+              </motion.button>
 
               <button
                 onClick={async () => {
@@ -801,13 +923,20 @@ function App() {
             </div>
           </div>
         </nav>
-        <Dashboard />
-      </div>
+          <Dashboard />
+          <TokenPurchaseModal
+            isOpen={showTokenModal}
+            onClose={() => setShowTokenModal(false)}
+            currentTokens={profile?.tokens || 0}
+          />
+        </div>
+      </ErrorBoundary>
     );
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <ErrorBoundary>
+      <div className="min-h-screen bg-background">
       <nav className="bg-panel border-b border-border">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <motion.div
@@ -846,11 +975,8 @@ function App() {
                   <motion.button
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
-                    onClick={async () => {
-                      // Ensure profile is loaded before navigating to dashboard
-                      if (!profile && !loading) {
-                        await refreshProfile();
-                      }
+                    onClick={() => {
+                      // Navigate immediately - Dashboard component will handle loading
                       handleViewChange('dashboard');
                     }}
                     className="px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 text-text-light hover:text-text-dark hover:bg-background"
@@ -1000,25 +1126,38 @@ function App() {
                       remainingPreviews={remainingPreviews}
                     />
                   ) : (
-                    <MessageDisplay
-                      message={generatedMessage}
-                      isGenerating={isGenerating}
-                      onRegenerate={handleRegenerate}
-                      hasTokens={(profile?.tokens || 0) >= 2}
-                      error={error}
-                      recipientName={
-                        currentFormData?.loverName ||
-                        currentFormData?.recipientName ||
-                        currentFormData?.apologyLoverName ||
-                        currentFormData?.giftCardLoverName ||
-                        currentFormData?.name ||
-                        undefined
-                      }
-                      messageType={currentFormData?.messageType}
-                    />
+                    <>
+                      {/* #region agent log */}
+                      {(() => {
+                        const urlEmptyWithMessage = !!generatedMessage && !selectedTemplateUrl;
+                        fetch('http://127.0.0.1:7242/ingest/b82c46f0-2300-44a2-a8cb-ae7c62dc77a5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:MessageDisplay-render',message:'H2/H5: Props at render',data:{selectedTemplateUrl:selectedTemplateUrl||null,hasGeneratedMessage:!!generatedMessage,generatedMessageLength:generatedMessage?.length??0,messageType:currentFormData?.messageType??null,STALE_RENDER:urlEmptyWithMessage},hypothesisId:'H2,H5',timestamp:Date.now()})}).catch(()=>{});
+                        return null;
+                      })()}
+                      {/* #endregion */}
+                      <MessageDisplay
+                        message={generatedMessage}
+                        isGenerating={isGenerating}
+                        onRegenerate={handleRegenerate}
+                        hasTokens={(profile?.tokens || 0) >= 2}
+                        error={error}
+                        recipientName={
+                          currentFormData?.loverName ||
+                          currentFormData?.recipientName ||
+                          currentFormData?.apologyLoverName ||
+                          currentFormData?.giftCardLoverName ||
+                          currentFormData?.name ||
+                          undefined
+                        }
+                        messageType={currentFormData?.messageType}
+                        templateUrl={selectedTemplateUrl || templateUrlRef.current || undefined}
+                        templateGradient={selectedTemplateData?.gradient ?? templateDataRef.current?.gradient}
+                        borderColor={selectedTemplateData?.borderColor ?? templateDataRef.current?.borderColor}
+                        accentColor={selectedTemplateData?.accentColor ?? templateDataRef.current?.accentColor}
+                      />
+                    </>
                   )}
 
-                  {showGiftCardTemplate && generatedMessage && !isGenerating && (
+                  {FEATURES.DESIGN_TEMPLATES && showGiftCardTemplate && generatedMessage && !isGenerating && (
                     <motion.div
                       initial={{ opacity: 0, y: 20 }}
                       animate={{ opacity: 1, y: 0 }}
@@ -1052,13 +1191,17 @@ function App() {
         isOpen={showTokenModal}
         onClose={() => {
           setShowTokenModal(false);
-          setTokenModalDetails({}); // Clear details when closing
         }}
-        onPurchase={handlePurchaseTokens}
         currentTokens={profile?.tokens || 0}
-        tokensRequired={tokenModalDetails.tokensRequired}
-        action={tokenModalDetails.action}
-        messageType={tokenModalDetails.messageType}
+      />
+
+      <PaymentModal
+        isOpen={showPaymentModal}
+        onClose={() => setShowPaymentModal(false)}
+        amount="2.99"
+        description="Message"
+        itemType="message"
+        onPaymentSuccess={() => setShowPaymentModal(false)}
       />
 
       <GiftCardEmailModal
@@ -1075,8 +1218,11 @@ function App() {
         onClose={() => setShowUnlockModal(false)}
         onUnlockSuccess={handleUnlockSuccess}
         previewId={previewId}
+        generatedMessageId={previewGeneratedMessageId ?? undefined}
+        fullMessage={fullPreviewMessageRef.current ?? generatedMessage}
       />
-    </div>
+      </div>
+    </ErrorBoundary>
   );
 }
 

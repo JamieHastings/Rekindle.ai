@@ -17,9 +17,19 @@ Open `.env.local` and add:
 
 ```env
 VITE_OPENAI_API_KEY=sk-your-actual-api-key-here
+
+# PayPal Configuration (for payment processing)
+# PayPal Sandbox (for testing)
+VITE_PAYPAL_CLIENT_ID=your_sandbox_client_id_here
+VITE_PAYPAL_MODE=sandbox
+
+# When you go live, change to:
+# VITE_PAYPAL_CLIENT_ID=your_live_client_id_here
+# VITE_PAYPAL_MODE=live
 ```
 
 Replace `sk-your-actual-api-key-here` with your actual OpenAI API key.
+Replace `your_sandbox_client_id_here` with your PayPal sandbox client ID (for testing).
 
 ### Step 3: Restart Dev Server
 

@@ -16,8 +16,18 @@ interface GeneratedMessage {
   is_preview?: boolean;
   occasion?: string;
   user_id: string;
+  input_data?: Record<string, unknown>;
   profiles?: {
     email: string;
+  };
+}
+
+function normalizeAdminMessage(row: any): GeneratedMessage {
+  const input = row.input_data || {};
+  return {
+    ...row,
+    recipient_name: row.recipient_name ?? input.recipientName ?? input.name ?? input.loverName ?? 'Unknown',
+    occasion: row.occasion ?? input.occasion,
   };
 }
 
@@ -32,14 +42,10 @@ const getMessageTypeLabel = (type: string): string => {
     'poem': 'Poem',
     'letter': 'Love Letter',
     'love_letter': 'Love Letter',
-    'apology': 'Apology',
-    'rekindling': 'Rekindling Message',
-    'text': 'Text Message',
+    'apology': 'Apology Message',
+    'text': 'Voicenote Script',
     'giftcard': 'Gift Card',
-    'voicenote': 'Voice Note',
-    'birthday': 'Birthday Message',
-    'support': 'Support Message',
-    'closure': 'Closure Message',
+    'voicenote': 'Voicenote Script',
   };
 
   return labels[type] || type;
@@ -91,7 +97,7 @@ export const AdminMessagesView = () => {
 
       if (error) throw error;
 
-      setMessages(data || []);
+      setMessages((data || []).map(normalizeAdminMessage));
       calculateStats(data || []);
     } catch (error) {
       console.error('Error fetching messages:', error);

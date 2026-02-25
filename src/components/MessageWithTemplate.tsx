@@ -73,8 +73,8 @@ const MessageWithTemplate = forwardRef<HTMLDivElement, MessageWithTemplateProps>
               {messageType === 'letter' && 'A Love Letter'}
               {messageType === 'poem' && 'A Poem for You'}
               {messageType === 'apology' && 'An Apology'}
+              {messageType === 'text' && 'A Voicenote Script'}
               {messageType === 'giftcard' && 'Gift Card Message'}
-              {messageType === 'rekindling' && 'A Message from the Heart'}
               {!messageType && 'A Special Message'}
             </h1>
             {recipientName && (

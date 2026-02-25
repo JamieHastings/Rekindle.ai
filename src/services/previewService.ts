@@ -47,8 +47,8 @@ export const PreviewService = {
           session_id: session.id,
           message_type: formData.messageType,
           input_data: formData,
-          preview_text: fullMessage, // Changed from output_text
-          // Removed is_preview since column doesn't exist
+          preview_text: fullMessage,
+          full_content: fullMessage, // So unlock-preview can save full poem to generated_messages
         })
         .select()
         .single();
@@ -106,7 +106,10 @@ export const PreviewService = {
           'apikey': SUPABASE_ANON_KEY,
           'Authorization': `Bearer ${accessToken}`,
         },
-        body: JSON.stringify({ previewId }),
+        body: JSON.stringify({
+          previewId,
+          generatedMessageId: options?.generatedMessageId ?? undefined,
+        }),
       });
 
       if (!response.ok) {
