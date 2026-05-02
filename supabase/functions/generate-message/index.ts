@@ -122,6 +122,76 @@ Deno.serve(async (req: Request) => {
       );
     }
 
+    let requestData: MessageRequest & { prompt?: string };
+    try {
+      requestData = await req.json();
+    } catch {
+      return new Response(
+        JSON.stringify({ error: "Invalid JSON body" }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
+
+    // Client-rendered prompt only (openaiService → promptEngine). Returns { text }.
+    if (typeof requestData.prompt === "string" && !requestData.messageType) {
+      const prompt = requestData.prompt.trim();
+      if (!prompt.length) {
+        return new Response(
+          JSON.stringify({ error: "Prompt cannot be empty" }),
+          {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
+      }
+      try {
+        const fullMessage = await callOpenAI({
+          model: "gpt-4o-mini",
+          messages: [
+            {
+              role: "system",
+              content:
+                "You are Rekindle.ai, an expert at writing authentic, emotional relationship messages. Write naturally as if you are the person sending the message.",
+            },
+            { role: "user", content: prompt },
+            ],
+          temperature: 0.85,
+          max_tokens: 3000,
+        });
+        if (!fullMessage || fullMessage.trim().length === 0) {
+          return new Response(
+            JSON.stringify({ error: "Failed to generate message content" }),
+            {
+              status: 500,
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+            }
+          );
+        }
+        return new Response(
+          JSON.stringify({ text: fullMessage.trim() }),
+          {
+            status: 200,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
+      } catch (err) {
+        console.error("Error in raw prompt path:", err);
+        return new Response(
+          JSON.stringify({
+            error: "Internal server error",
+            details: err instanceof Error ? err.message : String(err),
+          }),
+          {
+            status: 500,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
+      }
+    }
+
     // Initialize Supabase client with user's token
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -142,9 +212,6 @@ Deno.serve(async (req: Request) => {
         }
       );
     }
-
-    // Parse request body
-    const requestData: MessageRequest = await req.json();
 
     // When messageId is provided, we UPDATE an existing stub (template already saved by client)
     const messageId = requestData.messageId;

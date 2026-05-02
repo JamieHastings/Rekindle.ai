@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { Search, Heart, Calendar, MessageSquare, Sparkles, RotateCcw, Loader2 } from 'lucide-react';
+import { Search, Heart, Calendar, MessageSquare, Sparkles, RotateCcw, Loader2, Bug } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { toggleFavorite as toggleFavoriteService } from '../services/favoriteService';
 import TokenPurchaseModal from '../components/TokenPurchaseModal';
 import PDFPreviewModal from '../components/PDFPreviewModal';
+import BugReportModal from '../components/BugReportModal';
 import { fetchUserMessages, fetchMessageById, type Message } from '../hooks/useMessages';
 
 // Use Message type from useMessages hook
@@ -51,6 +52,7 @@ export default function Dashboard() {
   const [regenerationError, setRegenerationError] = useState('');
   const [favoriteError, setFavoriteError] = useState<string | null>(null);
   const [favoriteUpdatingId, setFavoriteUpdatingId] = useState<string | null>(null);
+  const [showBugReportModal, setShowBugReportModal] = useState(false);
 
   // Memoize fetchMessages to prevent unnecessary re-renders
   const fetchMessages = useCallback(async () => {
@@ -861,6 +863,25 @@ export default function Dashboard() {
           messageType={selectedMessage.message_type}
         />
       )}
+
+      <motion.button
+        type="button"
+        onClick={() => setShowBugReportModal(true)}
+        className="fixed bottom-6 right-6 flex items-center gap-2 px-4 py-3 rounded-full bg-[#CC4F4E] text-white shadow-lg hover:shadow-xl z-40 focus:outline-none focus:ring-2 focus:ring-[#CC4F4E] focus:ring-offset-2 focus:ring-offset-background"
+        whileHover={{ scale: 1.05 }}
+        whileTap={{ scale: 0.95 }}
+        aria-label="Report a bug or get help"
+        title="Report a bug or get help"
+      >
+        <Bug className="w-5 h-5 flex-shrink-0" />
+        <span className="text-sm font-medium whitespace-nowrap">Need help?</span>
+      </motion.button>
+
+      <BugReportModal
+        isOpen={showBugReportModal}
+        onClose={() => setShowBugReportModal(false)}
+        userEmail={profile?.email ?? user?.email ?? ''}
+      />
     </div>
   );
 }
