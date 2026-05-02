@@ -1,11 +1,5 @@
 // Shared OpenAI client for Edge Functions
 
-const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
-
-if (!OPENAI_API_KEY) {
-  throw new Error("Missing OPENAI_API_KEY environment variable");
-}
-
 export interface OpenAIRequest {
   model: string;
   messages: Array<{ role: string; content: string }>;
@@ -14,6 +8,11 @@ export interface OpenAIRequest {
 }
 
 export async function callOpenAI(request: OpenAIRequest): Promise<string> {
+  const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
+  if (!OPENAI_API_KEY) {
+    throw new Error("Missing OPENAI_API_KEY environment variable");
+  }
+
   console.log("📡 Calling OpenAI API with request:", {
     model: request.model,
     messages_count: request.messages?.length || 0,
