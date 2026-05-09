@@ -8,6 +8,7 @@ import TokenPurchaseModal from '../components/TokenPurchaseModal';
 import PDFPreviewModal from '../components/PDFPreviewModal';
 import BugReportModal from '../components/BugReportModal';
 import { fetchUserMessages, fetchMessageById, type Message } from '../hooks/useMessages';
+import { FEATURES } from '../config/features';
 
 // Use Message type from useMessages hook
 type GeneratedMessage = Message;
@@ -542,8 +543,12 @@ export default function Dashboard() {
               <option value="poem">Poem</option>
               <option value="letter">Letter</option>
               <option value="apology">Apology</option>
-              <option value="text">Text</option>
-              <option value="giftcard">Gift Card</option>
+              {FEATURES.VOICENOTE_MESSAGE && (
+                <option value="text">Voicenote script</option>
+              )}
+              {FEATURES.GIFT_CARD_MESSAGE && (
+                <option value="giftcard">Gift Card</option>
+              )}
             </select>
 
             <select

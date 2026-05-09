@@ -172,8 +172,12 @@ export default function MessageForm({ onGenerate, isGenerating, onMessageTypeSel
                 { value: 'poem', label: 'Poem' },
                 { value: 'letter', label: 'Love Letter' },
                 { value: 'apology', label: 'Apology Message' },
-                { value: 'text', label: 'Voicenote scripts' },
-                { value: 'giftcard', label: 'Gift Cards' }
+                ...(FEATURES.VOICENOTE_MESSAGE
+                  ? [{ value: 'text' as const, label: 'Voicenote scripts' }]
+                  : []),
+                ...(FEATURES.GIFT_CARD_MESSAGE
+                  ? [{ value: 'giftcard' as const, label: 'Gift Cards' }]
+                  : []),
               ].map((type) => (
                 <motion.button
                   key={type.value}
