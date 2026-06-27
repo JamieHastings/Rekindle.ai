@@ -30,6 +30,7 @@ export default function TokenPurchaseModal({
   const [loading, setLoading] = useState(true);
   const [successMessage, setSuccessMessage] = useState<{ tokensAdded: number; newBalance: number } | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -79,98 +80,40 @@ export default function TokenPurchaseModal({
   const handlePaymentSuccess = async (orderId: string) => {
     if (!selectedPackage) return;
 
+    // Close PayPal modal immediately and show processing state
+    setShowPaymentModal(false);
+    setIsProcessing(true);
     setErrorMessage(null);
-    console.log('🎉 Processing payment success for order:', orderId);
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { session } } = await supabase.auth.getSession();
 
-      if (!user) {
-        setShowPaymentModal(false);
+      if (!session) {
+        setIsProcessing(false);
         setErrorMessage('Please log in to purchase tokens.');
         return;
       }
 
-      console.log('👤 User authenticated:', user.id);
-
-      // Step 1: Save the payment to database
-      console.log('💾 Saving payment to database...');
-      const { data: paymentData, error: paymentError } = await supabase
-        .from('payments')
-        .insert({
-          user_id: user.id,
-          payment_id: orderId,
-          amount_cents: Math.round(selectedPackage.price * 100),
-          amount: Math.round(selectedPackage.price * 100),
-          currency: 'USD',
-          product: `${selectedPackage.name} - ${selectedPackage.tokens} tokens`,
-          tokens_purchased: selectedPackage.tokens,
-          package_name: selectedPackage.name,
-          status: 'completed',
-        })
-        .select()
-        .single();
-
-      if (paymentError) {
-        console.error('❌ Error saving payment:', paymentError);
-        throw paymentError;
-      }
-
-      console.log('✅ Payment saved:', paymentData);
-
-      // Step 2: Add tokens to user's account
-      console.log(`🪙 Adding ${selectedPackage.tokens} tokens to user account...`);
-
-      // Try using RPC function first
-      const { error: rpcError } = await supabase.rpc('add_tokens', {
-        user_id: user.id,
-        amount: selectedPackage.tokens,
+      const { data: result, error: fnError } = await supabase.functions.invoke('paypal-capture', {
+        body: { orderId, tokenAmount: selectedPackage.tokens },
+        headers: { Authorization: `Bearer ${session.access_token}` },
       });
 
-      if (rpcError) {
-        console.warn('⚠️ RPC function failed, using direct update:', rpcError);
-
-        // Fallback: Direct update to profiles table (fetch then update; Supabase client has no .raw())
-        const { data: profileBefore } = await supabase
-          .from('profiles')
-          .select('tokens')
-          .eq('id', user.id)
-          .single();
-
-        const currentTokens = profileBefore?.tokens ?? 0;
-        const newTokens = currentTokens + selectedPackage.tokens;
-
-        const { error: updateError } = await supabase
-          .from('profiles')
-          .update({ tokens: newTokens })
-          .eq('id', user.id);
-
-        if (updateError) {
-          console.error('❌ Error updating tokens:', updateError);
-          throw updateError;
-        }
+      if (fnError) {
+        throw new Error(fnError.message || 'Edge function error');
       }
 
-      console.log('✅ Tokens added successfully!');
+      if (!result?.success) {
+        throw new Error(result?.error || 'Payment capture failed');
+      }
 
-      // Step 3: Get updated token balance and refresh profile
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('tokens')
-        .eq('id', user.id)
-        .single();
-
-      const newBalance = profile?.tokens || 0;
-      console.log('💰 New token balance:', newBalance);
-
-      setShowPaymentModal(false);
-      setSuccessMessage({ tokensAdded: selectedPackage.tokens, newBalance });
       await refreshProfile();
+      setIsProcessing(false);
+      setSuccessMessage({ tokensAdded: result.tokens_added, newBalance: result.new_balance });
     } catch (error: any) {
-      console.error('❌ Error processing payment:', error);
-      setShowPaymentModal(false);
-      const errorMsg = error?.message || 'Unknown error';
-      setErrorMessage(`Payment received but there was an error: ${errorMsg}. Order ID: ${orderId}. Please contact support if tokens were not added.`);
+      console.error('Error processing payment:', error);
+      setIsProcessing(false);
+      setErrorMessage(`Payment received but there was an error: ${error?.message || 'Unknown error'}. Order ID: ${orderId}. Please contact support if tokens were not added.`);
     }
   };
 
@@ -182,12 +125,18 @@ export default function TokenPurchaseModal({
     onClose();
   };
 
-  if (loading) {
+  if (loading || isProcessing) {
     return (
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
         <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full p-6">
-          <div className="text-center">
-            <p className="text-gray-600">Loading packages...</p>
+          <div className="text-center py-6">
+            <div className="inline-block w-10 h-10 border-4 border-[#CC4F4E] border-t-transparent rounded-full animate-spin mb-4" />
+            <p className="text-gray-700 font-medium">
+              {isProcessing ? 'Processing your payment…' : 'Loading packages...'}
+            </p>
+            {isProcessing && (
+              <p className="text-sm text-gray-500 mt-1">This may take a few seconds. Please don't close this window.</p>
+            )}
           </div>
         </div>
       </div>
@@ -351,7 +300,7 @@ export default function TokenPurchaseModal({
         <PaymentModal
           isOpen={showPaymentModal}
           onClose={() => setShowPaymentModal(false)}
-          amount={selectedPackage.price.toString()}
+          amount={selectedPackage.price.toFixed(2)}
           description={`${selectedPackage.name} - ${selectedPackage.tokens} tokens`}
           itemType="tokens"
           onPaymentSuccess={handlePaymentSuccess}

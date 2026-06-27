@@ -1,5 +1,5 @@
 import { PayPalScriptProvider, PayPalButtons } from "@paypal/react-paypal-js";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 
 interface PayPalPaymentProps {
   amount: string; // e.g., "5.99"
@@ -30,11 +30,11 @@ export function PayPalPayment({
     );
   }
 
-  const initialOptions = {
+  const initialOptions = useMemo(() => ({
     clientId: paypalClientId,
     currency: "USD",
     intent: "capture",
-  };
+  }), [paypalClientId]);
 
   return (
     <div className="paypal-container">
@@ -73,18 +73,12 @@ export function PayPalPayment({
               },
             });
           }}
-          onApprove={async (data, actions) => {
-            try {
-              const details = await actions.order!.capture();
-              console.log("✅ Payment successful:", details);
-              
-              setIsPaying(false);
-              onSuccess(data.orderID);
-            } catch (error) {
-              console.error("❌ Payment capture failed:", error);
-              setIsPaying(false);
-              onError(error);
-            }
+          onApprove={async (data, _actions) => {
+            // Do not capture on the frontend — the backend (paypal-capture edge function)
+            // will capture the order, verify the amount, and add tokens atomically.
+            console.log("Payment approved, forwarding to backend:", data.orderID);
+            setIsPaying(false);
+            onSuccess(data.orderID);
           }}
           onError={(err) => {
             console.error("❌ PayPal error:", err);

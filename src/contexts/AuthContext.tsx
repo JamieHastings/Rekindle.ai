@@ -9,8 +9,7 @@ import {
   ReactNode,
 } from "react";
 import type { User, Session, AuthChangeEvent } from "@supabase/supabase-js";
-import { supabase } from "../lib/supabaseClient";
-import type { Profile } from "../lib/supabase";
+import { supabase, type Profile } from "../lib/supabase";
 import { getTokenCost } from "../services/tokenService";
 
 interface AuthContextType {
@@ -24,6 +23,8 @@ interface AuthContextType {
   refreshProfile: () => Promise<void>;
   /** Link anonymous messages to the given user; optional charge for existing users (sign-in). */
   linkAnonymousMessages: (userId: string, options?: { chargeForLinkedMessages?: boolean }) => Promise<any[] | undefined>;
+  /** Pause/resume the auth state listener. Use during password reset to prevent auto-login from verifyOtp. */
+  setAuthListenerPaused: (paused: boolean) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -40,6 +41,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const initialClearDoneRef = useRef(false);
+  const authListenerPausedRef = useRef(false);
+  const setAuthListenerPaused = (paused: boolean) => { authListenerPausedRef.current = paused; };
 
   // Load profile from database
   const loadProfile = async (userId: string) => {
@@ -301,7 +304,19 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         async (_event: AuthChangeEvent, session: Session | null) => {
           // Skip if this is the same state we just set in initializeAuth (avoids duplicate loadProfile)
           if (initialClearDoneRef.current) {
-            console.log('Auth state changed:', { event: _event, hasSession: !!session });
+            console.log('Auth state changed:', { event: _event, hasSession: !!session, paused: authListenerPausedRef.current });
+
+            // When paused (e.g. during password reset OTP flow), ignore all events
+            // so verifyOtp's auto-login never surfaces to the app.
+            if (authListenerPausedRef.current) return;
+
+            // USER_UPDATED fires during password reset — only refresh profile data,
+            // never touch session/user state (a null session here would kill the active session)
+            if (_event === 'USER_UPDATED') {
+              if (session?.user) await loadProfile(session.user.id);
+              return;
+            }
+
             setSession(session);
             setUser(session?.user ?? null);
             if (session?.user) {
@@ -511,6 +526,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     signOut,
     refreshProfile,
     linkAnonymousMessages,
+    setAuthListenerPaused,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

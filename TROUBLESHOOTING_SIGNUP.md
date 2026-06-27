@@ -37,8 +37,8 @@ Open browser console (F12) and run:
 
 ```javascript
 // Replace with your actual Supabase credentials
-const SUPABASE_URL = 'https://cxjigazdzujttcsyzatz.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN4amlnYXpkenVqdHRjc3l6YXR6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQxMDMxNjIsImV4cCI6MjA3OTY3OTE2Mn0.MKjlRzvVXYMgIIa5GdRfSRZatNR-SFYHu583ig7IN-s';
+const SUPABASE_URL = 'https://YOUR_PROJECT_REF.supabase.co';
+const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
 
 // Import Supabase (if not already loaded)
 const { createClient } = supabase;

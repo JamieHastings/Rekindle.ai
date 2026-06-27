@@ -10,15 +10,15 @@ if (!SUPABASE_URL) {
 }
 
 // Token costs for different message types
-// Premium (with templates): Love Letter 5, Gift Card 5
-// Standard: Poem 3, Apology 3, Voicenote 3; Regenerate 2 (in regenerate flow)
+// Premium (with templates): Love Letter 6, Gift Card 6
+// Standard: Poem 4, Apology 4, Voicenote 4; Regenerate 2 (in regenerate flow)
 export const TOKEN_COSTS = {
-  poem: 3,
-  letter: 5,
-  apology: 3,
-  text: 3,
-  giftcard: 5,
-  love_letter: 5,
+  poem: 4,
+  letter: 6,
+  apology: 4,
+  text: 4,
+  giftcard: 6,
+  love_letter: 6,
 } as const;
 
 export type MessageType = keyof typeof TOKEN_COSTS;

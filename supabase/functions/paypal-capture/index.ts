@@ -1,23 +1,23 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { supabaseAdmin } from "../_shared/supabaseAdmin.ts";
 import { corsHeaders } from "../_shared/cors.ts";
+import { adjustUserTokens } from "../_shared/tokens.ts";
+
+const PAYPAL_MODE = Deno.env.get('PAYPAL_MODE') || 'sandbox';
+const PAYPAL_BASE_URL = PAYPAL_MODE === 'live'
+  ? 'https://api-m.paypal.com'
+  : 'https://api-m.sandbox.paypal.com';
 
 async function getPayPalAccessToken(): Promise<string> {
   const clientId = Deno.env.get('PAYPAL_CLIENT_ID');
   const clientSecret = Deno.env.get('PAYPAL_CLIENT_SECRET');
-  const mode = Deno.env.get('PAYPAL_MODE') || 'sandbox';
 
   if (!clientId || !clientSecret) {
     throw new Error('PayPal credentials not configured');
   }
 
-  const baseUrl = mode === 'live'
-    ? 'https://api-m.paypal.com'
-    : 'https://api-m.sandbox.paypal.com';
-
   const auth = btoa(`${clientId}:${clientSecret}`);
-
-  const response = await fetch(`${baseUrl}/v1/oauth2/token`, {
+  const response = await fetch(`${PAYPAL_BASE_URL}/v1/oauth2/token`, {
     method: 'POST',
     headers: {
       'Authorization': `Basic ${auth}`,
@@ -35,12 +35,7 @@ async function getPayPalAccessToken(): Promise<string> {
 }
 
 async function capturePayPalOrder(orderId: string, accessToken: string) {
-  const mode = Deno.env.get('PAYPAL_MODE') || 'sandbox';
-  const baseUrl = mode === 'live'
-    ? 'https://api-m.paypal.com'
-    : 'https://api-m.sandbox.paypal.com';
-
-  const response = await fetch(`${baseUrl}/v2/checkout/orders/${orderId}/capture`, {
+  const response = await fetch(`${PAYPAL_BASE_URL}/v2/checkout/orders/${orderId}/capture`, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${accessToken}`,
@@ -63,31 +58,46 @@ Deno.serve(async (req: Request) => {
 
   try {
     const authHeader = req.headers.get('Authorization');
-    if (!authHeader) {
-      throw new Error('No authorization header');
-    }
+    if (!authHeader) throw new Error('No authorization header');
 
     const token = authHeader.replace('Bearer ', '');
     const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
-
-    if (authError || !user) {
-      throw new Error('Invalid token');
-    }
-
-    console.log('✅ User authenticated:', user.id);
+    if (authError || !user) throw new Error('Invalid token');
 
     const { orderId, tokenAmount } = await req.json();
+    if (!orderId || !tokenAmount) throw new Error('Missing orderId or tokenAmount');
 
-    if (!orderId || !tokenAmount) {
-      throw new Error('Missing orderId or tokenAmount');
+    // Idempotency: reject duplicate order processing
+    const { data: existing } = await supabaseAdmin
+      .from('token_transactions')
+      .select('id')
+      .filter('metadata->>paypal_order_id', 'eq', orderId)
+      .maybeSingle();
+
+    if (existing) {
+      console.log('⚠️ Order already processed:', orderId);
+      const { data: profile } = await supabaseAdmin
+        .from('profiles').select('tokens').eq('id', user.id).single();
+      return new Response(
+        JSON.stringify({ success: true, tokens_added: 0, new_balance: profile?.tokens ?? 0, order_id: orderId }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
+      );
     }
 
-    console.log('💳 Capturing PayPal order:', { orderId, tokenAmount });
+    // Look up expected price from DB (source of truth)
+    const { data: pkg, error: pkgError } = await supabaseAdmin
+      .from('token_packages')
+      .select('price')
+      .eq('tokens', tokenAmount)
+      .eq('is_active', true)
+      .single();
+
+    if (pkgError || !pkg) {
+      throw new Error(`No active package found for ${tokenAmount} tokens`);
+    }
 
     const accessToken = await getPayPalAccessToken();
     const captureResult = await capturePayPalOrder(orderId, accessToken);
-
-    console.log('📦 Capture result:', captureResult);
 
     if (captureResult.status !== 'COMPLETED') {
       throw new Error(`Payment not completed. Status: ${captureResult.status}`);
@@ -97,83 +107,29 @@ Deno.serve(async (req: Request) => {
       captureResult.purchase_units[0].payments.captures[0].amount.value
     );
 
-    console.log('💰 Payment amount:', paidAmount);
-
-    const tokenPackages: { [key: number]: number } = {
-      10: 5.00,
-      25: 10.00,
-      50: 18.00,
-      100: 30.00,
-    };
-
-    const expectedAmount = tokenPackages[tokenAmount];
-    if (!expectedAmount || Math.abs(paidAmount - expectedAmount) > 0.01) {
-      throw new Error('Payment amount mismatch');
+    if (Math.abs(paidAmount - pkg.price) > 0.01) {
+      throw new Error(`Payment amount mismatch: paid ${paidAmount}, expected ${pkg.price}`);
     }
 
-    const { data: profile, error: profileError } = await supabaseAdmin
-      .from('profiles')
-      .select('tokens')
-      .eq('id', user.id)
-      .single();
+    console.log('💰 Payment verified:', { paidAmount, tokenAmount });
 
-    if (profileError) {
-      throw profileError;
-    }
+    const result = await adjustUserTokens(
+      user.id,
+      tokenAmount,
+      `Purchased ${tokenAmount} tokens via PayPal`,
+      { paypal_order_id: orderId, amount_paid: paidAmount }
+    );
 
-    const newTokenBalance = (profile.tokens || 0) + tokenAmount;
-
-    const { error: updateError } = await supabaseAdmin
-      .from('profiles')
-      .update({ tokens: newTokenBalance })
-      .eq('id', user.id);
-
-    if (updateError) {
-      throw updateError;
-    }
-
-    console.log('✅ Tokens added:', { tokenAmount, newBalance: newTokenBalance });
-
-    await supabaseAdmin.from('token_transactions').insert({
-      user_id: user.id,
-      transaction_type: 'credit',
-      amount: tokenAmount,
-      description: `Purchased ${tokenAmount} tokens via PayPal`,
-      metadata: {
-        paypal_order_id: orderId,
-        amount_paid: paidAmount,
-      },
-    });
-
-    try {
-      await supabaseAdmin.from('stripe_payments').insert({
-        user_id: user.id,
-        amount: paidAmount,
-        tokens_awarded: tokenAmount,
-        status: 'completed',
-        stripe_session_id: orderId,
-        metadata: {
-          payment_provider: 'paypal',
-          paypal_order_id: orderId,
-        },
-      });
-    } catch (err) {
-      console.error('Failed to log payment (table may not exist):', err);
-    }
-
-    console.log('✅ Payment logged');
+    console.log('✅ Tokens added:', { tokenAmount, newBalance: result.tokens_remaining });
 
     return new Response(
       JSON.stringify({
         success: true,
         tokens_added: tokenAmount,
-        new_balance: newTokenBalance,
+        new_balance: result.tokens_remaining,
         order_id: orderId,
       }),
-      {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 200
-      }
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
     );
 
   } catch (error) {
@@ -183,10 +139,7 @@ Deno.serve(async (req: Request) => {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
       }),
-      {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 500
-      }
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
     );
   }
 });

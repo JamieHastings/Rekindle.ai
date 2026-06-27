@@ -66,6 +66,7 @@ function App() {
     }
   }, [user, profile, loading, refreshProfile]);
 
+
   // Handle admin navigation - ensure profile is loaded and user is admin
   useEffect(() => {
     // Only run this effect when we're on an admin route (not regular dashboard)
@@ -273,7 +274,7 @@ function App() {
       return;
     }
 
-    // Check if user has enough tokens (costs vary by type: 5 for letter/gift card, 3 for poem/apology/birthday, etc.)
+    // Check if user has enough tokens (costs vary by type: 6 for letter/gift card, 4 for poem/apology/voicenote, etc.)
     const tokenCost = getTokenCost(formData.messageType);
     if (!profile || profile.tokens < tokenCost) {
       setShowTokenModal(true);
@@ -1221,6 +1222,7 @@ function App() {
         generatedMessageId={previewGeneratedMessageId ?? undefined}
         fullMessage={fullPreviewMessageRef.current ?? generatedMessage}
       />
+
       </div>
     </ErrorBoundary>
   );
