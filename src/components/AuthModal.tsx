@@ -17,7 +17,7 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
   const { signIn, signUp, setAuthListenerPaused } = useAuth();
 
   // Login / signup
-  const [mode, setMode] = useState<"login" | "signup" | "forgot-password">("login");
+  const [mode, setMode] = useState<"login" | "signup" | "forgot-password" | "email-confirmation">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -34,7 +34,7 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
   const [resetSuccess, setResetSuccess] = useState("");
   const [recoveryAccessToken, setRecoveryAccessToken] = useState<string | null>(null);
 
-  const switchMode = (next: "login" | "signup" | "forgot-password") => {
+  const switchMode = (next: "login" | "signup" | "forgot-password" | "email-confirmation") => {
     setMode(next);
     setErrorMsg(null);
     setResetStep("email");
@@ -46,10 +46,20 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
   const handleSubmit = async () => {
     setLoading(true);
     setErrorMsg(null);
-    const action = mode === "login" ? signIn : signUp;
-    const { error } = await action(email, password);
-    if (error) setErrorMsg(error);
-    else onClose();
+    if (mode === "login") {
+      const { error } = await signIn(email, password);
+      if (error) setErrorMsg(error);
+      else onClose();
+    } else {
+      const result = await signUp(email, password);
+      if (result.error) {
+        setErrorMsg(result.error);
+      } else if (result.needsEmailConfirmation) {
+        setMode("email-confirmation");
+      } else {
+        onClose();
+      }
+    }
     setLoading(false);
   };
 
@@ -142,6 +152,7 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
 
   // ── Header icon / title per state ────────────────────────────────
   const headerIcon = () => {
+    if (mode === "email-confirmation") return <Mail className="w-5 h-5 text-black" />;
     if (mode !== "forgot-password") return <Heart className="w-5 h-5 text-black" />;
     if (resetStep === "otp") return <ShieldCheck className="w-5 h-5 text-black" />;
     if (resetStep === "password") return <KeyRound className="w-5 h-5 text-black" />;
@@ -151,6 +162,7 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
   const headerTitle = () => {
     if (mode === "login") return "Welcome Back";
     if (mode === "signup") return "Create Account";
+    if (mode === "email-confirmation") return "Check Your Email";
     if (resetStep === "otp") return "Enter Code";
     if (resetStep === "password") return "Set New Password";
     return "Reset Password";
@@ -185,8 +197,41 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
             </div>
 
             <div className="p-6">
+              {/* ── Email confirmation pending ── */}
+              {mode === "email-confirmation" && (
+                <div className="space-y-4 text-center">
+                  <div className="flex justify-center">
+                    <div className="p-4 bg-[#CC4F4E]/10 rounded-full">
+                      <Mail className="w-10 h-10 text-[#CC4F4E]" />
+                    </div>
+                  </div>
+                  <p className="text-text-dark font-medium">
+                    We sent a confirmation link to
+                  </p>
+                  <p className="text-[#CC4F4E] font-semibold break-all">{email}</p>
+                  <p className="text-text-light text-sm">
+                    Click the link in that email to activate your account. You can close this window.
+                  </p>
+                  <p className="text-text-light text-xs">
+                    Didn't receive it? Check your spam folder or{" "}
+                    <button
+                      className="text-[#CC4F4E] hover:opacity-80 transition-opacity underline"
+                      onClick={() => switchMode("signup")}
+                    >
+                      try again
+                    </button>.
+                  </p>
+                  <button
+                    onClick={onClose}
+                    className="w-full py-3 bg-[#CC4F4E] text-black font-semibold rounded-lg hover:opacity-90 transition mt-2"
+                  >
+                    Got it
+                  </button>
+                </div>
+              )}
+
               {/* ── Login / Signup ── */}
-              {mode !== "forgot-password" && (
+              {mode !== "forgot-password" && mode !== "email-confirmation" && (
                 <>
                   <div className="flex gap-2 mb-6">
                     <button

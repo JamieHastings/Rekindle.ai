@@ -30,8 +30,8 @@ export const PreviewService = {
     // Note: generateAIText only takes one parameter (prompt), not messageType
     const fullMessage = await generateAIText(prompt);
 
-    // Create preview (first 150 characters)
-    const previewLength = 150;
+    // Create preview (first 350 characters)
+    const previewLength = 350;
     const partialContent = fullMessage.substring(0, previewLength) + '...';
 
     // Try to save preview to database

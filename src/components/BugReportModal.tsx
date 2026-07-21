@@ -4,7 +4,7 @@ import { X, Bug, Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 
-const FORMSUBMIT_URL = 'https://formsubmit.co/1c5d83fa2db0f4aaebcb23a1fa59fd21';
+const FORMSUBMIT_URL = 'https://formsubmit.co/support@rekindle-online.com';
 
 interface BugReportModalProps {
   isOpen: boolean;

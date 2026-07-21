@@ -18,7 +18,7 @@ interface AuthContextType {
   profile: Profile | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
-  signUp: (email: string, password: string) => Promise<{ error: string | null }>;
+  signUp: (email: string, password: string) => Promise<{ error: string | null; needsEmailConfirmation?: boolean }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
   /** Link anonymous messages to the given user; optional charge for existing users (sign-in). */
@@ -136,12 +136,32 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  // Resolve anonymous session id from localStorage or signup metadata (email-confirm return may lack localStorage)
+  const resolveAnonymousSessionId = async (): Promise<string | null> => {
+    if (typeof localStorage !== 'undefined') {
+      const fromStorage = localStorage.getItem('anonymous_session_id');
+      if (fromStorage) return fromStorage;
+    }
+
+    try {
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const fromMeta = authUser?.user_metadata?.anonymous_session_id;
+      if (typeof fromMeta === 'string' && fromMeta.length > 0) {
+        return fromMeta;
+      }
+    } catch {
+      // ignore
+    }
+
+    return null;
+  };
+
   // Link anonymous messages (stored with anonymous_session_id in input_data) to the given user
   const linkAnonymousMessages = async (
     newUserId: string,
     options?: { chargeForLinkedMessages?: boolean }
   ) => {
-    const anonymousSessionId = typeof localStorage !== 'undefined' ? localStorage.getItem('anonymous_session_id') : null;
+    const anonymousSessionId = await resolveAnonymousSessionId();
 
     console.log('🔗 LINKING DEBUG:', {
       newUserId,
@@ -280,6 +300,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           setUser(existingSession.user);
           // Load profile and wait for it before marking loading done (avoids race with listener)
           await loadProfile(existingSession.user.id);
+          // Link anonymous previews after email confirmation or returning session (not only SIGNED_IN)
+          await linkAnonymousMessages(existingSession.user.id);
         } else {
           console.log('No existing session found');
           setSession(null);
@@ -321,6 +343,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             setUser(session?.user ?? null);
             if (session?.user) {
               await loadProfile(session.user.id);
+              // Link anonymous messages on sign-in and when session is restored (e.g. email confirm)
+              if (_event === 'SIGNED_IN' || _event === 'INITIAL_SESSION') {
+                await linkAnonymousMessages(session.user.id);
+              }
             } else {
               setProfile(null);
             }
@@ -373,100 +399,45 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  const signUp = async (email: string, password: string) => {
+  const signUp = async (email: string, password: string): Promise<{ error: string | null; needsEmailConfirmation?: boolean }> => {
     try {
       console.log('🔄 Starting signup process for:', email);
 
       const anonymousSessionId = typeof localStorage !== 'undefined' ? localStorage.getItem('anonymous_session_id') : null;
 
-      // Step 1: Create the user account
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
+          emailRedirectTo: `${window.location.origin}/auth/confirm`,
           data: {
             anonymous_session_id: anonymousSessionId ?? undefined,
           },
         },
       });
-      
+
       if (error) {
         console.error('❌ Signup error:', error);
         return { error: error.message };
       }
 
-      // Step 2: Check if user was created
       if (!data.user) {
         console.error('❌ No user data returned from signup');
         return { error: 'Failed to create user account' };
       }
 
-      const userId = data.user.id;
-      console.log('✅ User created:', userId);
+      console.log('✅ User created:', data.user.id);
 
-      // Link any anonymous messages to the new user (no charge for new sign-up)
-      await linkAnonymousMessages(userId);
-
-      // Step 3: Ensure we have a session (sign in if needed)
-      let hasSession = !!data.session;
-      
+      // session is null when email confirmation is required — tell the UI to show the confirm screen
       if (!data.session) {
-        console.log('⏳ No session after signup, automatically signing in...');
-        
-        // Wait a moment for the user to be fully created in the system
-        await new Promise(resolve => setTimeout(resolve, 500));
-        
-        // Automatically sign in with the credentials to establish a session
-        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-
-        if (signInError) {
-          console.error('❌ Auto sign-in after signup failed:', signInError);
-          // Still return success since account was created
-          // User can manually sign in later
-          console.log('✅ Account created, user can sign in manually');
-          return { error: null };
-        }
-
-        hasSession = !!signInData?.session;
-        console.log('✅ Successfully signed in after signup');
+        console.log('📧 Email confirmation required — awaiting user to click the link');
+        return { error: null, needsEmailConfirmation: true };
       }
 
-      // Step 4: Wait for database trigger to create profile, then verify it exists
-      // Only check if we have a session (needed for RLS)
-      if (hasSession) {
-        console.log('⏳ Waiting for profile creation (trigger)...');
-        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait for trigger
-
-        try {
-          // Verify profile exists
-          const { data: existingProfile, error: profileError } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', userId)
-            .single();
-
-          if (profileError || !existingProfile) {
-            console.error('❌ Profile not created by trigger');
-            // Return error - the signup component will handle showing the alert
-            return { error: 'Account created but profile setup failed. Please try logging in or contact support.' };
-          }
-
-          console.log('✅ Profile confirmed (created by trigger):', existingProfile.id);
-        } catch (profileCheckError) {
-          console.error('❌ Error checking profile:', profileCheckError);
-          return { error: 'Account created but profile verification failed. Please try logging in.' };
-        }
-      }
-
-      // Step 5: Profile will be loaded by onAuthStateChange listener
+      // Email confirmation is disabled: we have a live session right away
+      await linkAnonymousMessages(data.user.id);
       console.log('✅ Signup complete');
-
-      // Reload to show linked messages
       window.location.reload();
-
       return { error: null };
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to create account';

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Search, Heart, Calendar, MessageSquare, Sparkles, RotateCcw, Loader2, Bug } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
@@ -33,7 +33,12 @@ const getMessageTypeLabel = (type: string): string => {
   return labels[type] || type;
 };
 
-export default function Dashboard() {
+interface DashboardProps {
+  initialMessageId?: string;
+  onInitialMessageOpened?: () => void;
+}
+
+export default function Dashboard({ initialMessageId, onInitialMessageOpened }: DashboardProps = {}) {
   const auth = useAuth();
   const user = auth?.user;
   const profile = auth?.profile;
@@ -54,6 +59,7 @@ export default function Dashboard() {
   const [favoriteError, setFavoriteError] = useState<string | null>(null);
   const [favoriteUpdatingId, setFavoriteUpdatingId] = useState<string | null>(null);
   const [showBugReportModal, setShowBugReportModal] = useState(false);
+  const initialMessageOpenedRef = useRef(false);
 
   // Memoize fetchMessages to prevent unnecessary re-renders
   const fetchMessages = useCallback(async () => {
@@ -338,6 +344,19 @@ export default function Dashboard() {
       setIsLoadingMessage(false);
     }
   }, [messages]);
+
+  // Auto-open a message after email confirmation redirect
+  useEffect(() => {
+    console.log('🟡 [auto-open] effect ran', { initialMessageId, opened: initialMessageOpenedRef.current, loading, messagesCount: messages.length });
+    if (!initialMessageId || initialMessageOpenedRef.current || loading || messages.length === 0) return;
+    const target = messages.find(m => m.id === initialMessageId);
+    console.log('🟡 [auto-open] target found:', !!target, target?.id);
+    if (!target) return;
+    initialMessageOpenedRef.current = true;
+    setSelectedMessageId(initialMessageId);
+    setSelectedMessage(target);
+    setTimeout(() => onInitialMessageOpened?.(), 0);
+  }, [initialMessageId, messages, loading, onInitialMessageOpened]);
 
   const regenerateMessage = async (messageId: string) => {
     if (!user || !profile) return;

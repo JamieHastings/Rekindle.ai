@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Lock, Sparkles } from 'lucide-react';
+import { X, Lock, Sparkles, Mail } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { PreviewService } from '../services/previewService';
@@ -22,9 +22,10 @@ export default function UnlockPreviewModal({
   onClose,
   onUnlockSuccess,
   previewId,
+  generatedMessageId,
   fullMessage: fullMessageProp,
 }: UnlockPreviewModalProps) {
-  const [mode, setMode] = useState<'signup' | 'signin'>('signup');
+  const [mode, setMode] = useState<'signup' | 'signin' | 'email-confirmation'>('signup');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
@@ -48,7 +49,11 @@ export default function UnlockPreviewModal({
         email,
         password,
         options: {
-          data: { full_name: fullName },
+          emailRedirectTo: `${window.location.origin}/auth/confirm`,
+          data: {
+            full_name: fullName,
+            anonymous_session_id: anonymousSessionId ?? undefined,
+          },
         },
       });
 
@@ -57,23 +62,27 @@ export default function UnlockPreviewModal({
 
       console.log('✅ Account created:', data.user.id);
 
-      // Link anonymous messages: must match App.tsx storage (user_id null, anonymous_session_id in input_data)
+      // Email confirmation is required — session is null until the user clicks the link
+      if (!data.session) {
+        localStorage.setItem('rekindle_pending_unlock', JSON.stringify({
+          messageId: generatedMessageId || previewId,
+          fullMessage: fullMessageProp || '',
+        }));
+        setMode('email-confirmation');
+        return;
+      }
+
+      // Email confirmation disabled — session exists, proceed immediately
       if (anonymousSessionId) {
         const { data: linked, error: linkError } = await supabase
           .from('generated_messages')
-          .update({
-            user_id: data.user.id,
-            is_preview: false,
-          })
+          .update({ user_id: data.user.id, is_preview: false })
           .is('user_id', null)
           .contains('input_data', { anonymous_session_id: anonymousSessionId })
           .select();
-
         if (!linkError) {
           console.log(`✅ Linked ${linked?.length || 0} messages`);
-          if (typeof localStorage !== 'undefined') {
-            localStorage.removeItem('anonymous_session_id');
-          }
+          localStorage.removeItem('anonymous_session_id');
         }
       }
 
@@ -166,6 +175,39 @@ export default function UnlockPreviewModal({
             </div>
 
             <div className="p-6">
+              {/* Email confirmation pending — hide the tabs and form */}
+              {mode === 'email-confirmation' && (
+                <div className="space-y-4 text-center">
+                  <div className="flex justify-center">
+                    <div className="p-4 bg-[#CC4F4E]/10 rounded-full">
+                      <Mail className="w-10 h-10 text-[#CC4F4E]" />
+                    </div>
+                  </div>
+                  <p className="text-text-dark font-medium">We sent a confirmation link to</p>
+                  <p className="text-[#CC4F4E] font-semibold break-all">{email}</p>
+                  <p className="text-text-light text-sm">
+                    Click the link in that email to activate your account. Your message will be waiting for you in your dashboard.
+                  </p>
+                  <p className="text-text-light text-xs">
+                    Didn't receive it? Check your spam folder or{' '}
+                    <button
+                      className="text-[#CC4F4E] hover:opacity-80 transition-opacity underline"
+                      onClick={() => { setMode('signup'); setError(''); }}
+                    >
+                      try again
+                    </button>.
+                  </p>
+                  <button
+                    onClick={onClose}
+                    className="w-full py-3 bg-[#CC4F4E] text-black font-semibold rounded-lg hover:opacity-90 transition mt-2"
+                  >
+                    Got it
+                  </button>
+                </div>
+              )}
+
+              {mode !== 'email-confirmation' && (
+              <>
               <div className="flex gap-2 mb-6">
                 <button
                   onClick={() => setMode('signup')}
@@ -251,6 +293,8 @@ export default function UnlockPreviewModal({
                     : 'Sign In & Unlock'}
                 </motion.button>
               </div>
+              </>
+              )}
             </div>
           </motion.div>
         </div>

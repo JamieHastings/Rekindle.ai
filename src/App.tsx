@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { Coins, LogOut, LayoutDashboard, Home as HomeIcon } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { Coins, LogOut, LayoutDashboard, Home as HomeIcon, HeartHandshake, Mail, BookOpen, Sun, Moon, Heart, Star, Gift, Sparkles, PenLine, Lightbulb, ChevronRight } from 'lucide-react';
+import { motion } from 'framer-motion';
 import MessageForm, { FormData } from './components/MessageForm';
 import MessageDisplay from './components/MessageDisplay';
 import AuthModal from './components/AuthModal';
@@ -20,15 +20,75 @@ import { generateMessage } from './services/messageGenerator';
 import PaymentModal from './components/PaymentModal';
 import ErrorBoundary from './components/ErrorBoundary';
 import { FEATURES } from './config/features';
+import ApologyLandingPage from './pages/ApologyLandingPage';
 
 type View = 'home' | 'generator' | 'dashboard' | 'admin';
 
 function App() {
-  const { user, profile, signOut, refreshProfile, loading } = useAuth();
+  const { user, profile, signOut, refreshProfile, loading, linkAnonymousMessages } = useAuth();
   const [currentView, setCurrentView] = useState<View>('home');
   const [generatedMessage, setGeneratedMessage] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
+
+  // ── Email confirmation route (/auth/confirm) ──────────────────────
+  const [isConfirmView, setIsConfirmView] = useState(() => window.location.pathname === '/auth/confirm');
+  const [isApologyLanding] = useState(() => window.location.pathname === '/apology-message-generator');
+  const [confirmStatus, setConfirmStatus] = useState<'loading' | 'success' | 'error'>('loading');
+  const [confirmError, setConfirmError] = useState('');
+
+  useEffect(() => {
+    if (!isConfirmView) return;
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
+    (async () => {
+      try {
+        if (code) {
+          // PKCE flow: exchange the one-time code for a real session
+          const { error } = await supabase.auth.exchangeCodeForSession(code);
+          if (error) {
+            setConfirmStatus('error');
+            setConfirmError(error.message);
+            return;
+          }
+        }
+        // Link any anonymous preview messages to the confirmed account
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          await linkAnonymousMessages(session.user.id);
+        }
+        setConfirmStatus('success');
+      } catch (err) {
+        setConfirmStatus('error');
+        setConfirmError(err instanceof Error ? err.message : 'Confirmation failed. Please try again.');
+      }
+    })();
+  }, [isConfirmView, linkAnonymousMessages]);
+
+  // Once confirmed, navigate directly to dashboard — no page reload needed
+  useEffect(() => {
+    if (!isConfirmView || confirmStatus !== 'success') return;
+    const t = setTimeout(() => {
+      // Read pending message before clearing the confirm view
+      const raw = localStorage.getItem('rekindle_pending_unlock');
+      console.log('🔑 [confirm] rekindle_pending_unlock in localStorage:', raw);
+      if (raw) {
+        try {
+          const { messageId } = JSON.parse(raw);
+          localStorage.removeItem('rekindle_pending_unlock');
+          console.log('🔑 [confirm] setting pendingDashboardMessageId:', messageId);
+          if (messageId) setPendingDashboardMessageId(messageId);
+        } catch {
+          localStorage.removeItem('rekindle_pending_unlock');
+        }
+      }
+      window.history.replaceState({}, '', '/');
+      setIsConfirmView(false);
+      setCurrentView('dashboard');
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [isConfirmView, confirmStatus]);
+
   const [showTokenModal, setShowTokenModal] = useState(false);
   const [error, setError] = useState('');
   const [currentFormData, setCurrentFormData] = useState<FormData | null>(null);
@@ -42,7 +102,7 @@ function App() {
     accentColor?: string;
   } | null>(null);
   const [showGiftCardEmail, setShowGiftCardEmail] = useState(false);
-  const [messageTypeSelected, setMessageTypeSelected] = useState(false);
+  const [activeMessageType, setActiveMessageType] = useState('apology');
   const [isPreviewMode, setIsPreviewMode] = useState(false);
   const [previewId, setPreviewId] = useState<string>('');
   /** Id of the generated_messages row for the current preview (so unlock can update it with full content instead of inserting a duplicate). */
@@ -51,6 +111,7 @@ function App() {
   const [remainingPreviews, setRemainingPreviews] = useState(3);
   const [lastGeneratedMessageId, setLastGeneratedMessageId] = useState<string | null>(null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [pendingDashboardMessageId, setPendingDashboardMessageId] = useState<string | null>(null);
 
   // H2/H5 fix: ref holds template URL from same tick as generation so first render after setGeneratedMessage has it even if state hasn't flushed
   const templateUrlRef = useRef<string>('');
@@ -137,7 +198,6 @@ function App() {
     // Keep generator view when user signs up with generated message
     if (user && generatedMessage && currentView === 'generator') {
       console.log('User signed up with generated message - keeping on generator view');
-      setMessageTypeSelected(true);
       setIsPreviewMode(false);
     }
   }, [user, profile, loading, currentView, generatedMessage]);
@@ -171,11 +231,29 @@ function App() {
     // When user signs up and has a message, keep it visible
     if (user && profile && generatedMessage && currentView === 'generator') {
       console.log('📝 User authenticated with message - ensuring visibility');
-      setMessageTypeSelected(true);
       setIsPreviewMode(false);
       setShowUnlockModal(false); // Close unlock modal if still open
     }
   }, [user, profile, generatedMessage, currentView]);
+
+  // After email confirmation, navigate to dashboard and open the pending message
+  useEffect(() => {
+    if (!user || loading) return;
+    const raw = localStorage.getItem('rekindle_pending_unlock');
+    console.log('🔑 [fallback] user set, loading done. rekindle_pending_unlock:', raw);
+    if (!raw) return;
+    try {
+      const { messageId } = JSON.parse(raw);
+      localStorage.removeItem('rekindle_pending_unlock');
+      console.log('🔑 [fallback] setting pendingDashboardMessageId:', messageId);
+      if (messageId) {
+        setPendingDashboardMessageId(messageId);
+      }
+      setCurrentView('dashboard');
+    } catch {
+      localStorage.removeItem('rekindle_pending_unlock');
+    }
+  }, [user, loading]);
 
   const handleGenerate = async (formData: FormData) => {
     if (!user) {
@@ -195,6 +273,14 @@ function App() {
 
       console.log('✅ Preview generation allowed, proceeding...');
 
+      // Ensure anonymous session id exists before preview/signup so linking works after email confirm
+      let anonymousSessionId = localStorage.getItem('anonymous_session_id');
+      if (!anonymousSessionId) {
+        anonymousSessionId = crypto.randomUUID();
+        localStorage.setItem('anonymous_session_id', anonymousSessionId);
+        console.log('🆔 Created anonymous session:', anonymousSessionId);
+      }
+
       setCurrentFormData(formData);
       setIsGenerating(true);
       setGeneratedMessage('');
@@ -207,13 +293,6 @@ function App() {
 
         const preview = await PreviewService.generatePreview(formData);
         console.log('✅ Preview generated successfully');
-
-        // Anonymous session ID for linking on signup
-        const anonymousSessionId = localStorage.getItem('anonymous_session_id') || crypto.randomUUID();
-        if (!localStorage.getItem('anonymous_session_id')) {
-          localStorage.setItem('anonymous_session_id', anonymousSessionId);
-          console.log('🆔 Created anonymous session:', anonymousSessionId);
-        }
 
         const { data: savedMessage, error: saveError } = await supabase
           .from('generated_messages')
@@ -773,9 +852,6 @@ function App() {
       setCurrentView('generator');
     }
     
-    // Ensure message type is selected so the display shows
-    setMessageTypeSelected(true);
-    
     console.log('✅ Message unlocked and displayed');
   };
 
@@ -785,12 +861,61 @@ function App() {
       setGeneratedMessage('');
       setError('');
       setShowGiftCardTemplate(false);
-      setMessageTypeSelected(false);
+      setActiveMessageType('apology');
     }
   };
 
   // Helper function to check if user is admin
   const isAdminUser = profile ? Boolean(profile.is_admin) : false;
+
+  // ── Email confirmation page ───────────────────────────────────────
+  if (isConfirmView) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-6">
+        <div className="bg-panel border border-border rounded-2xl shadow-2xl max-w-sm w-full p-8 text-center space-y-4">
+          {confirmStatus === 'loading' && (
+            <>
+              <div className="flex justify-center">
+                <div className="p-4 bg-[#CC4F4E]/10 rounded-full animate-pulse">
+                  <Mail className="w-10 h-10 text-[#CC4F4E]" />
+                </div>
+              </div>
+              <h2 className="text-xl font-bold text-text-dark">Confirming your email…</h2>
+              <p className="text-text-light text-sm">Please wait a moment.</p>
+            </>
+          )}
+          {confirmStatus === 'success' && (
+            <>
+              <div className="flex justify-center">
+                <div className="p-4 bg-[#CC4F4E]/10 rounded-full">
+                  <Heart className="w-10 h-10 text-[#CC4F4E]" />
+                </div>
+              </div>
+              <h2 className="text-xl font-bold text-text-dark">Email confirmed!</h2>
+              <p className="text-text-light text-sm">Your account is now active. Taking you to your dashboard…</p>
+            </>
+          )}
+          {confirmStatus === 'error' && (
+            <>
+              <div className="flex justify-center">
+                <div className="p-4 bg-[#CC4F4E]/10 rounded-full">
+                  <Mail className="w-10 h-10 text-[#CC4F4E]" />
+                </div>
+              </div>
+              <h2 className="text-xl font-bold text-text-dark">Confirmation failed</h2>
+              <p className="text-[#CC4F4E] text-sm">{confirmError}</p>
+              <button
+                onClick={() => { window.history.replaceState({}, '', '/'); window.location.reload(); }}
+                className="w-full py-3 bg-[#CC4F4E] text-black font-semibold rounded-lg hover:opacity-90 transition"
+              >
+                Go home
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   // Role-based routing: Admin users see AdminDashboard
   // Only handle 'admin' view here - dashboard view is handled separately below
@@ -924,7 +1049,10 @@ function App() {
             </div>
           </div>
         </nav>
-          <Dashboard />
+          <Dashboard
+            initialMessageId={pendingDashboardMessageId ?? undefined}
+            onInitialMessageOpened={() => setPendingDashboardMessageId(null)}
+          />
           <TokenPurchaseModal
             isOpen={showTokenModal}
             onClose={() => setShowTokenModal(false)}
@@ -1041,6 +1169,14 @@ function App() {
       </nav>
 
       {currentView === 'home' ? (
+        isApologyLanding ? (
+          <ApologyLandingPage
+            onStartGenerator={() => {
+              setActiveMessageType('apology');
+              handleViewChange('generator');
+            }}
+          />
+        ) : (
         <motion.section
           key="landing"
           initial={{ opacity: 0 }}
@@ -1082,43 +1218,61 @@ function App() {
             </motion.div>
           </div>
         </motion.section>
+        )
       ) : (
         <motion.div
           key="generator"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="max-w-7xl mx-auto px-6 py-8"
+          className="max-w-7xl mx-auto px-4 py-6"
         >
-          <div className={`grid grid-cols-1 ${messageTypeSelected ? 'lg:grid-cols-2' : ''} gap-6 overflow-hidden rounded-2xl`}>
-            <motion.div
-              initial={{ opacity: 0, x: -50 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.5 }}
-              className="bg-panel p-6 flex flex-col"
-            >
-              <h2 className="text-2xl font-bold text-text-dark mb-4">
-                Tell us about your message
-              </h2>
-              <MessageForm
-                onGenerate={handleGenerate}
-                isGenerating={isGenerating}
-                onMessageTypeSelect={setMessageTypeSelected}
-              />
-            </motion.div>
+          {(() => {
+            const MESSAGE_TYPES = [
+              { value: 'apology', label: 'Apology Message', icon: HeartHandshake, subtitle: 'Express your sincere apology', available: true },
+              { value: 'letter', label: 'Love Letter', icon: Mail, subtitle: 'Write a heartfelt love letter', available: true },
+              { value: 'poem', label: 'Poems', icon: BookOpen, subtitle: 'Beautiful verses for someone special', available: true },
+              { value: 'goodmorning', label: 'Good Morning', icon: Sun, subtitle: 'Start their day with warmth', available: false },
+              { value: 'goodnight', label: 'Good Night', icon: Moon, subtitle: 'End their day with love', available: false },
+              { value: 'missyou', label: 'Miss You', icon: Heart, subtitle: 'Tell them you miss them', available: false },
+              { value: 'thankyou', label: 'Thank You', icon: Star, subtitle: 'Show your appreciation', available: false },
+              { value: 'birthday', label: 'Birthday Message', icon: Gift, subtitle: 'Make their birthday special', available: false },
+              { value: 'anniversary', label: 'Anniversary Message', icon: Sparkles, subtitle: 'Celebrate your love', available: false },
+              { value: 'custom', label: 'Custom Message', icon: PenLine, subtitle: 'Create a custom message', available: false },
+            ];
+            const activeTypeInfo = MESSAGE_TYPES.find(t => t.value === activeMessageType) || MESSAGE_TYPES[0];
+            const ActiveIcon = activeTypeInfo.icon;
 
-            <AnimatePresence>
-              {messageTypeSelected && (
+            return (
+              <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr_260px] gap-4 items-start">
+                {/* LEFT: Form Panel */}
                 <motion.div
-                  key="message-display"
-                  initial={{ opacity: 0, x: 50 }}
+                  initial={{ opacity: 0, x: -30 }}
                   animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 50 }}
-                  transition={{ duration: 0.5 }}
-                  className="bg-background p-6 flex flex-col"
+                  transition={{ duration: 0.4 }}
+                  className="bg-panel rounded-2xl p-5 flex flex-col"
                 >
-                  <h2 className="text-2xl font-bold text-text-dark mb-4">
-                    Your Generated Message
+                  <div className="flex items-center gap-2 mb-1">
+                    <ActiveIcon className="w-5 h-5 text-[#CC4F4E]" />
+                    <h2 className="text-lg font-bold text-text-dark">{activeTypeInfo.label}</h2>
+                  </div>
+                  <p className="text-xs text-text-light mb-4">{activeTypeInfo.subtitle}</p>
+                  <MessageForm
+                    onGenerate={handleGenerate}
+                    isGenerating={isGenerating}
+                    messageType={activeMessageType}
+                  />
+                </motion.div>
+
+                {/* CENTER: Message Display Panel */}
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.4, delay: 0.1 }}
+                  className="bg-background rounded-2xl p-5 flex flex-col min-h-[600px]"
+                >
+                  <h2 className="text-lg font-bold text-text-dark mb-4">
+                    Your Generated {activeTypeInfo.label}
                   </h2>
                   {isPreviewMode && generatedMessage && !isGenerating ? (
                     <PreviewMessageDisplay
@@ -1127,35 +1281,26 @@ function App() {
                       remainingPreviews={remainingPreviews}
                     />
                   ) : (
-                    <>
-                      {/* #region agent log */}
-                      {(() => {
-                        const urlEmptyWithMessage = !!generatedMessage && !selectedTemplateUrl;
-                        fetch('http://127.0.0.1:7242/ingest/b82c46f0-2300-44a2-a8cb-ae7c62dc77a5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:MessageDisplay-render',message:'H2/H5: Props at render',data:{selectedTemplateUrl:selectedTemplateUrl||null,hasGeneratedMessage:!!generatedMessage,generatedMessageLength:generatedMessage?.length??0,messageType:currentFormData?.messageType??null,STALE_RENDER:urlEmptyWithMessage},hypothesisId:'H2,H5',timestamp:Date.now()})}).catch(()=>{});
-                        return null;
-                      })()}
-                      {/* #endregion */}
-                      <MessageDisplay
-                        message={generatedMessage}
-                        isGenerating={isGenerating}
-                        onRegenerate={handleRegenerate}
-                        hasTokens={(profile?.tokens || 0) >= 2}
-                        error={error}
-                        recipientName={
-                          currentFormData?.loverName ||
-                          currentFormData?.recipientName ||
-                          currentFormData?.apologyLoverName ||
-                          currentFormData?.giftCardLoverName ||
-                          currentFormData?.name ||
-                          undefined
-                        }
-                        messageType={currentFormData?.messageType}
-                        templateUrl={selectedTemplateUrl || templateUrlRef.current || undefined}
-                        templateGradient={selectedTemplateData?.gradient ?? templateDataRef.current?.gradient}
-                        borderColor={selectedTemplateData?.borderColor ?? templateDataRef.current?.borderColor}
-                        accentColor={selectedTemplateData?.accentColor ?? templateDataRef.current?.accentColor}
-                      />
-                    </>
+                    <MessageDisplay
+                      message={generatedMessage}
+                      isGenerating={isGenerating}
+                      onRegenerate={handleRegenerate}
+                      hasTokens={(profile?.tokens || 0) >= 2}
+                      error={error}
+                      recipientName={
+                        currentFormData?.loverName ||
+                        currentFormData?.recipientName ||
+                        currentFormData?.apologyLoverName ||
+                        currentFormData?.giftCardLoverName ||
+                        currentFormData?.name ||
+                        undefined
+                      }
+                      messageType={currentFormData?.messageType}
+                      templateUrl={selectedTemplateUrl || templateUrlRef.current || undefined}
+                      templateGradient={selectedTemplateData?.gradient ?? templateDataRef.current?.gradient}
+                      borderColor={selectedTemplateData?.borderColor ?? templateDataRef.current?.borderColor}
+                      accentColor={selectedTemplateData?.accentColor ?? templateDataRef.current?.accentColor}
+                    />
                   )}
 
                   {FEATURES.DESIGN_TEMPLATES && showGiftCardTemplate && generatedMessage && !isGenerating && (
@@ -1180,9 +1325,67 @@ function App() {
                     </motion.div>
                   )}
                 </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
+
+                {/* RIGHT: Message Types Sidebar */}
+                <motion.div
+                  initial={{ opacity: 0, x: 30 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ duration: 0.4, delay: 0.2 }}
+                  className="bg-panel rounded-2xl p-4"
+                >
+                  <h3 className="text-xs font-semibold text-text-light uppercase tracking-wider mb-3 px-1">
+                    Message Types
+                  </h3>
+                  <div className="space-y-0.5">
+                    {MESSAGE_TYPES.map((type) => {
+                      const TypeIcon = type.icon;
+                      const isActive = activeMessageType === type.value;
+                      return (
+                        <button
+                          key={type.value}
+                          type="button"
+                          onClick={() => {
+                            if (type.available) {
+                              setActiveMessageType(type.value);
+                              setGeneratedMessage('');
+                              setError('');
+                              setIsPreviewMode(false);
+                              setShowGiftCardTemplate(false);
+                            }
+                          }}
+                          disabled={!type.available}
+                          className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all ${
+                            isActive
+                              ? 'bg-[#CC4F4E] text-black'
+                              : type.available
+                              ? 'text-text-dark hover:bg-background'
+                              : 'text-text-light opacity-50 cursor-not-allowed'
+                          }`}
+                        >
+                          <TypeIcon className="w-4 h-4 flex-shrink-0" />
+                          <span className="text-sm font-medium flex-1">{type.label}</span>
+                          {isActive && <ChevronRight className="w-4 h-4 flex-shrink-0" />}
+                          {!type.available && (
+                            <span className="text-xs opacity-60 flex-shrink-0">Soon</span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="mt-3 pt-3 border-t border-border">
+                    <button
+                      type="button"
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-text-light hover:text-text-dark hover:bg-background transition-all"
+                    >
+                      <Lightbulb className="w-4 h-4 flex-shrink-0" />
+                      <span className="text-sm font-medium">Need Inspiration?</span>
+                    </button>
+                  </div>
+                </motion.div>
+              </div>
+            );
+          })()}
         </motion.div>
       )}
 
