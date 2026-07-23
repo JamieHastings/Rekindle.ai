@@ -304,6 +304,7 @@ export default function TokenPurchaseModal({
           description={`${selectedPackage.name} - ${selectedPackage.tokens} tokens`}
           itemType="tokens"
           onPaymentSuccess={handlePaymentSuccess}
+          tokenAmount={selectedPackage.tokens}
         />
       )}
     </>

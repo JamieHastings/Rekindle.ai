@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { PayPalPayment } from "./PayPalPayment";
+import { FygaroPayment } from "./FygaroPayment";
 import { X } from "lucide-react";
 
 interface PaymentModalProps {
@@ -8,6 +10,7 @@ interface PaymentModalProps {
   description: string;
   itemType: "tokens" | "message";
   onPaymentSuccess: (orderId: string) => void;
+  tokenAmount?: number;
 }
 
 export function PaymentModal({
@@ -17,7 +20,10 @@ export function PaymentModal({
   description,
   itemType,
   onPaymentSuccess,
+  tokenAmount,
 }: PaymentModalProps) {
+  const [cardError, setCardError] = useState('');
+
   if (!isOpen) return null;
 
   const handleSuccess = async (orderId: string) => {
@@ -68,6 +74,27 @@ export function PaymentModal({
           onSuccess={handleSuccess}
           onError={handleError}
         />
+
+        {tokenAmount && (
+          <>
+            <div className="my-4 flex items-center gap-3">
+              <div className="flex-1 h-px" style={{ backgroundColor: '#e5e7eb' }} />
+              <span className="text-sm" style={{ color: '#9ca3af' }}>or pay with card</span>
+              <div className="flex-1 h-px" style={{ backgroundColor: '#e5e7eb' }} />
+            </div>
+
+            {cardError && (
+              <p className="mb-3 text-sm text-center" style={{ color: '#dc2626' }}>
+                {cardError}
+              </p>
+            )}
+
+            <FygaroPayment
+              tokenAmount={tokenAmount}
+              onError={(msg) => setCardError(msg)}
+            />
+          </>
+        )}
 
         <button
           onClick={onClose}

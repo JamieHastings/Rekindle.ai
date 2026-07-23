@@ -245,6 +245,7 @@ export function TokenPurchase({ onClose }: { onClose?: () => void }) {
           description={`${selectedPackage.name} - ${selectedPackage.tokens} tokens`}
           itemType="tokens"
           onPaymentSuccess={handlePaymentSuccess}
+          tokenAmount={selectedPackage.tokens}
         />
       )}
     </div>
