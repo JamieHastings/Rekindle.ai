@@ -21,7 +21,6 @@ import PaymentModal from './components/PaymentModal';
 import ErrorBoundary from './components/ErrorBoundary';
 import { FEATURES } from './config/features';
 import ApologyLandingPage from './pages/ApologyLandingPage';
-import PaymentStatus from './pages/PaymentStatus';
 
 type View = 'home' | 'generator' | 'dashboard' | 'admin';
 
@@ -35,7 +34,6 @@ function App() {
   // ── Email confirmation route (/auth/confirm) ──────────────────────
   const [isConfirmView, setIsConfirmView] = useState(() => window.location.pathname === '/auth/confirm');
   const [isApologyLanding] = useState(() => window.location.pathname === '/apology-message-generator');
-  const [isPaymentStatus] = useState(() => window.location.pathname === '/payment-status');
   const [confirmStatus, setConfirmStatus] = useState<'loading' | 'success' | 'error'>('loading');
   const [confirmError, setConfirmError] = useState('');
 
@@ -869,18 +867,6 @@ function App() {
 
   // Helper function to check if user is admin
   const isAdminUser = profile ? Boolean(profile.is_admin) : false;
-
-  // ── Fygaro payment return page (/payment-status) ─────────────────
-  if (isPaymentStatus) {
-    return (
-      <PaymentStatus
-        onGoHome={() => {
-          window.history.replaceState({}, '', '/');
-          window.location.reload();
-        }}
-      />
-    );
-  }
 
   // ── Email confirmation page ───────────────────────────────────────
   if (isConfirmView) {
