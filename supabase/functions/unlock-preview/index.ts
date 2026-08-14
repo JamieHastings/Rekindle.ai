@@ -125,13 +125,13 @@ Deno.serve(async (req: Request) => {
     let message = "Message unlocked successfully!";
 
     if (!profile.signup_bonus_awarded) {
-      const { error: bonusError } = await supabaseAdmin.rpc("award_signup_bonus", {
+      const { data: bonusGranted, error: bonusError } = await supabaseAdmin.rpc("award_signup_bonus", {
         user_id: user.id
       });
 
-      if (!bonusError) {
-        tokensAwarded = 5;
-        message = "Welcome! Your message is unlocked and you received 5 free tokens!";
+      if (!bonusError && bonusGranted) {
+        tokensAwarded = 3;
+        message = "Welcome! Your message is unlocked and you received 3 free tokens!";
       }
     }
 

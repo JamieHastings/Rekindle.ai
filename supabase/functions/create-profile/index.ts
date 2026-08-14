@@ -73,14 +73,15 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // Create profile with service_role (bypasses RLS)
+    // Create profile with service_role (bypasses RLS). Tokens come from idempotent signup bonus.
     const { data: newProfile, error: createError } = await supabaseAdmin
       .from("profiles")
       .insert({
         id: user.id,
         email: user.email || "",
         full_name: user.user_metadata?.full_name || null,
-        tokens: 3, // Initial tokens: 3 (not 5)
+        tokens: 0,
+        signup_bonus_awarded: false,
       })
       .select()
       .single();
@@ -107,8 +108,22 @@ Deno.serve(async (req: Request) => {
       );
     }
 
+    const { data: bonusGranted } = await supabaseAdmin.rpc("award_signup_bonus", {
+      user_id: user.id,
+    });
+
+    const { data: updatedProfile } = await supabaseAdmin
+      .from("profiles")
+      .select("id, tokens")
+      .eq("id", user.id)
+      .single();
+
     return new Response(
-      JSON.stringify({ success: true, profile: { id: newProfile.id, tokens: newProfile.tokens } }),
+      JSON.stringify({
+        success: true,
+        profile: { id: updatedProfile?.id ?? newProfile.id, tokens: updatedProfile?.tokens ?? newProfile.tokens },
+        signup_bonus_granted: !!bonusGranted,
+      }),
       {
         status: 200,
         headers: { ...corsHeaders, "Content-Type": "application/json" },

@@ -10,6 +10,7 @@ import {
 } from "react";
 import type { User, Session, AuthChangeEvent } from "@supabase/supabase-js";
 import { supabase, type Profile } from "../lib/supabase";
+import { EXISTING_ACCOUNT_MESSAGE, signupIndicatesExistingAccount } from "../lib/signupAlreadyExists";
 import { getTokenCost } from "../services/tokenService";
 
 interface AuthContextType {
@@ -81,7 +82,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                   id: userId,
                   email: authUser.email ?? '',
                   full_name: authUser.user_metadata?.full_name ?? '',
-                  tokens: 3,
+                  tokens: 0,
+                  signup_bonus_awarded: false,
                 })
                 .select()
                 .single();
@@ -424,6 +426,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (!data.user) {
         console.error('❌ No user data returned from signup');
         return { error: 'Failed to create user account' };
+      }
+
+      if (signupIndicatesExistingAccount(data.user, data.session)) {
+        return { error: EXISTING_ACCOUNT_MESSAGE };
       }
 
       console.log('✅ User created:', data.user.id);

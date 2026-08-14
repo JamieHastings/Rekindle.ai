@@ -17,6 +17,7 @@ export type Profile = {
   created_at: string;
   updated_at: string;
   is_admin?: boolean;
+  signup_bonus_awarded?: boolean;
 };
 
 export type GeneratedMessage = {
@@ -47,7 +48,7 @@ export type GeneratedMessage = {
 export type TokenTransaction = {
   id: string;
   user_id: string;
-  transaction_type: 'purchase' | 'usage' | 'refund';
+  transaction_type: 'purchase' | 'usage' | 'refund' | 'credit' | 'debit' | 'adjustment' | 'signup_bonus';
   amount: number;
   description: string;
   metadata: Record<string, any> | null;

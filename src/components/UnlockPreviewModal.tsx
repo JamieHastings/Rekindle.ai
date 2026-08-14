@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Lock, Sparkles, Mail } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { EXISTING_ACCOUNT_MESSAGE, signupIndicatesExistingAccount } from '../lib/signupAlreadyExists';
 import { useAuth } from '../contexts/AuthContext';
 import { PreviewService } from '../services/previewService';
 import { SessionManager } from '../utils/sessionManager';
@@ -59,6 +60,11 @@ export default function UnlockPreviewModal({
 
       if (signUpError) throw signUpError;
       if (!data.user) throw new Error('No user returned');
+
+      if (signupIndicatesExistingAccount(data.user, data.session)) {
+        setError(EXISTING_ACCOUNT_MESSAGE);
+        return;
+      }
 
       console.log('✅ Account created:', data.user.id);
 
